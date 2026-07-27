@@ -1,0 +1,16 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "package.json",
+      "use": "@vercel/next"
+    }
+  ],
+  "regions": [
+    "iad1",
+    "sfo1",
+    "fra1",
+    "hnd1",
+    "syd1"
+  ]
+}
