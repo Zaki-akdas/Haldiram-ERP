@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/db';
-import { orders, customers, users, settlements } from '@/db/schema';
-import { eq, desc, and, or, like, sql, gte, lte } from 'drizzle-orm';
+import { supabaseAdmin } from '@/db';
 import { getCurrentUser } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
@@ -17,124 +15,88 @@ export async function GET(request: NextRequest) {
     const reportType = searchParams.get('type') || 'sales';
     const startDate = searchParams.get('startDate');
     const endDate = searchParams.get('endDate');
+
     const isAdmin = user.role === 'admin';
     const isManager = user.role === 'manager' || user.role === 'admin';
 
-    const dateConditions: any[] = [];
-    if (startDate) dateConditions.push(gte(orders.orderDate, new Date(startDate)));
-    if (endDate) dateConditions.push(lte(orders.orderDate, new Date(endDate)));
-
     if (reportType === 'sales') {
-      const salesByDay = await db
-        .select({
-          date: sql<string>`date_trunc('day', ${orders.orderDate})::date`,
-          orders: sql<number>`count(*)`,
-          revenue: sql<number>`coalesce(sum(${orders.grandTotal}), 0)`,
-          collected: sql<number>`coalesce(sum(${orders.amountPaid}), 0)`,
-        })
-        .from(orders)
-        .where(
-          and(
-            ...dateConditions,
-            !isAdmin ? eq(orders.salespersonId, user.id) : undefined
-          )
-        )
-        .groupBy(sql`date_trunc('day', ${orders.orderDate})`)
-        .orderBy(desc(sql`date_trunc('day', ${orders.orderDate})`))
-        .limit(30);
+      let query = supabaseAdmin.from('orders').select('order_date, grand_total, amount_paid, salesperson_id');
+      if (!isAdmin) query = query.eq('salesperson_id', user.id);
+      if (startDate) query = query.gte('order_date', startDate);
+      if (endDate) query = query.lte('order_date', endDate);
 
-      return NextResponse.json({
-        type: 'sales',
-        data: salesByDay.map(d => ({
-          ...d,
-          revenue: Number(d.revenue),
-          collected: Number(d.collected),
-        })),
-      });
+      const { data: ordersData } = await query;
+      const salesByDay: Record<string, { orders: number; revenue: number; collected: number }> = {};
+      for (const o of ordersData || []) {
+        const day = new Date(o.order_date).toISOString().split('T')[0];
+        if (!salesByDay[day]) salesByDay[day] = { orders: 0, revenue: 0, collected: 0 };
+        salesByDay[day].orders++;
+        salesByDay[day].revenue += Number(o.grand_total || 0);
+        salesByDay[day].collected += Number(o.amount_paid || 0);
+      }
+      const data = Object.entries(salesByDay)
+        .map(([date, stats]) => ({ date, ...stats }))
+        .sort((a, b) => b.date.localeCompare(a.date))
+        .slice(0, 30);
+      return NextResponse.json({ type: 'sales', data });
     }
 
     if (reportType === 'collections') {
-      const collections = await db
-        .select({
-          date: sql<string>`date_trunc('day', ${settlements.settledAt})::date`,
-          count: sql<number>`count(*)`,
-          amount: sql<number>`coalesce(sum(${settlements.amount}), 0)`,
-          cash: sql<number>`coalesce(sum(${settlements.amount}) filter (where ${settlements.paymentMode} = 'cash'), 0)`,
-          upi: sql<number>`coalesce(sum(${settlements.amount}) filter (where ${settlements.paymentMode} = 'upi'), 0)`,
-          bank: sql<number>`coalesce(sum(${settlements.amount}) filter (where ${settlements.paymentMode} = 'bank'), 0)`,
-        })
-        .from(settlements)
-        .where(!isAdmin ? eq(settlements.salespersonId, user.id) : undefined)
-        .groupBy(sql`date_trunc('day', ${settlements.settledAt})`)
-        .orderBy(desc(sql`date_trunc('day', ${settlements.settledAt})`))
-        .limit(30);
+      let query = supabaseAdmin.from('settlements').select('settled_at, amount, payment_mode, salesperson_id');
+      if (!isAdmin) query = query.eq('salesperson_id', user.id);
+      if (startDate) query = query.gte('settled_at', startDate);
+      if (endDate) query = query.lte('settled_at', endDate);
 
-      return NextResponse.json({
-        type: 'collections',
-        data: collections.map(c => ({
-          ...c,
-          amount: Number(c.amount),
-          cash: Number(c.cash),
-          upi: Number(c.upi),
-          bank: Number(c.bank),
-        })),
-      });
+      const { data: settlementsData } = await query;
+      const collections: Record<string, { count: number; amount: number; cash: number; upi: number; bank: number }> = {};
+      for (const s of settlementsData || []) {
+        const day = new Date(s.settled_at).toISOString().split('T')[0];
+        if (!collections[day]) collections[day] = { count: 0, amount: 0, cash: 0, upi: 0, bank: 0 };
+        collections[day].count++;
+        collections[day].amount += Number(s.amount || 0);
+        if (s.payment_mode === 'cash') collections[day].cash += Number(s.amount || 0);
+        if (s.payment_mode === 'upi') collections[day].upi += Number(s.amount || 0);
+        if (s.payment_mode === 'bank') collections[day].bank += Number(s.amount || 0);
+      }
+      const data = Object.entries(collections)
+        .map(([date, stats]) => ({ date, ...stats }))
+        .sort((a, b) => b.date.localeCompare(a.date))
+        .slice(0, 30);
+      return NextResponse.json({ type: 'collections', data });
     }
 
     if (reportType === 'customers' && isManager) {
-      const customerReport = await db
-        .select({
-          id: customers.id,
-          name: customers.name,
-          city: customers.city,
-          totalOrders: sql<number>`count(DISTINCT ${orders.id})`,
-          totalRevenue: sql<number>`coalesce(sum(${orders.grandTotal}), 0)`,
-          outstanding: sql<number>`coalesce(sum(${orders.balance}), 0)`,
-          lastOrder: sql<string>`max(${orders.orderDate})`,
-        })
-        .from(customers)
-        .leftJoin(orders, eq(orders.customerId, customers.id))
-        .groupBy(customers.id)
-        .orderBy(desc(sql`coalesce(sum(${orders.grandTotal}), 0)`))
-        .limit(50);
-
-      return NextResponse.json({
-        type: 'customers',
-        data: customerReport.map(c => ({
-          ...c,
-          totalRevenue: Number(c.totalRevenue),
-          outstanding: Number(c.outstanding),
-        })),
-      });
+      const { data: customersData } = await supabaseAdmin.from('customers').select('id, name, city');
+      const result: any[] = [];
+      for (const c of customersData || []) {
+        const { data: ordersData } = await supabaseAdmin.from('orders').select('grand_total, balance, order_date').eq('customer_id', c.id);
+        const totalOrders = ordersData?.length || 0;
+        const totalRevenue = ordersData?.reduce((sum, o) => sum + Number(o.grand_total || 0), 0) || 0;
+        const outstanding = ordersData?.reduce((sum, o) => sum + Number(o.balance || 0), 0) || 0;
+        const lastOrder = ordersData?.length ? new Date(Math.max(...ordersData.map((o: any) => new Date(o.order_date).getTime()))).toISOString() : null;
+        result.push({ id: c.id, name: c.name, city: c.city, totalOrders, totalRevenue, outstanding, lastOrder });
+      }
+      const data = result.sort((a, b) => b.totalRevenue - a.totalRevenue).slice(0, 50);
+      return NextResponse.json({ type: 'customers', data: data.map(c => ({ ...c, totalRevenue: Number(c.totalRevenue), outstanding: Number(c.outstanding) })) });
     }
 
     if (reportType === 'salespeople' && isManager) {
-      const spReport = await db
-        .select({
-          id: users.id,
-          name: users.name,
-          totalOrders: sql<number>`count(DISTINCT ${orders.id})`,
-          totalRevenue: sql<number>`coalesce(sum(${orders.grandTotal}), 0)`,
-          collected: sql<number>`coalesce(sum(${orders.amountPaid}), 0)`,
-          pending: sql<number>`coalesce(sum(${orders.balance}), 0)`,
-          avgOrderValue: sql<number>`coalesce(avg(${orders.grandTotal}), 0)`,
-        })
-        .from(users)
-        .leftJoin(orders, eq(orders.salespersonId, users.id))
-        .where(eq(users.role, 'salesperson'))
-        .groupBy(users.id)
-        .orderBy(desc(sql`coalesce(sum(${orders.grandTotal}), 0)`));
-
-      return NextResponse.json({
-        type: 'salespeople',
-        data: spReport.map(sp => ({
-          ...sp,
-          totalRevenue: Number(sp.totalRevenue),
-          collected: Number(sp.collected),
-          pending: Number(sp.pending),
-          avgOrderValue: Number(sp.avgOrderValue),
-        })),
-      });
+      const { data: usersData } = await supabaseAdmin.from('users').select('id, name').eq('role', 'salesperson');
+      const result: any[] = [];
+      for (const u of usersData || []) {
+        const { data: ordersData } = await supabaseAdmin.from('orders').select('grand_total, amount_paid, balance').eq('salesperson_id', u.id);
+        result.push({
+          id: u.id,
+          name: u.name,
+          totalOrders: ordersData?.length || 0,
+          totalRevenue: ordersData?.reduce((sum, o) => sum + Number(o.grand_total || 0), 0) || 0,
+          collected: ordersData?.reduce((sum, o) => sum + Number(o.amount_paid || 0), 0) || 0,
+          pending: ordersData?.reduce((sum, o) => sum + Number(o.balance || 0), 0) || 0,
+          avgOrderValue: ordersData?.length ? (ordersData.reduce((sum, o) => sum + Number(o.grand_total || 0), 0) / ordersData.length) : 0,
+        });
+      }
+      const data = result.sort((a, b) => b.totalRevenue - a.totalRevenue);
+      return NextResponse.json({ type: 'salespeople', data: data.map(sp => ({ ...sp, totalRevenue: Number(sp.totalRevenue), collected: Number(sp.collected), pending: Number(sp.pending), avgOrderValue: Number(sp.avgOrderValue) })) });
     }
 
     return NextResponse.json({ type: reportType, data: [] });

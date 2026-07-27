@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/db';
-import { settlements, orders, customers, users, activityLogs } from '@/db/schema';
-import { eq, desc, and, sql } from 'drizzle-orm';
+import { supabaseAdmin } from '@/db';
 import { getCurrentUser } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
@@ -9,9 +7,7 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: NextRequest) {
   try {
     const user = await getCurrentUser();
-    if (!user) {
-      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
-    }
+    if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
 
     const { searchParams } = new URL(request.url);
     const page = parseInt(searchParams.get('page') || '1', 10);
@@ -19,50 +15,35 @@ export async function GET(request: NextRequest) {
     const offset = (page - 1) * limit;
     const isAdmin = user.role === 'admin';
 
-    const whereClause = !isAdmin ? eq(settlements.salespersonId, user.id) : undefined;
+    let query = supabaseAdmin
+      .from('settlements')
+      .select('*, orders(invoice_number), customers(name), users!settlements_salesperson_id_fkey(name)', { count: 'exact' })
+      .order('settled_at', { ascending: false });
 
-    const [settlementList, countResult] = await Promise.all([
-      db
-        .select({
-          id: settlements.id,
-          orderId: settlements.orderId,
-          invoiceNumber: orders.invoiceNumber,
-          customerId: settlements.customerId,
-          customerName: customers.name,
-          salespersonId: settlements.salespersonId,
-          salespersonName: users.name,
-          amount: settlements.amount,
-          paymentMode: settlements.paymentMode,
-          referenceNumber: settlements.referenceNumber,
-          notes: settlements.notes,
-          settledAt: settlements.settledAt,
-          createdAt: settlements.createdAt,
-        })
-        .from(settlements)
-        .innerJoin(orders, eq(settlements.orderId, orders.id))
-        .innerJoin(customers, eq(settlements.customerId, customers.id))
-        .innerJoin(users, eq(settlements.salespersonId, users.id))
-        .where(whereClause)
-        .orderBy(desc(settlements.settledAt))
-        .limit(limit)
-        .offset(offset),
-      db
-        .select({ count: sql<number>`count(*)` })
-        .from(settlements)
-        .where(whereClause),
-    ]);
+    if (!isAdmin) query = query.eq('salesperson_id', user.id);
+
+    const { data: settlementList, count, error } = await query.range(offset, offset + limit - 1);
+    if (error) throw error;
+
+    const formatted = (settlementList || []).map((s: any) => ({
+      id: s.id,
+      orderId: s.order_id,
+      invoiceNumber: s.orders?.invoice_number,
+      customerId: s.customer_id,
+      customerName: s.customers?.name,
+      salespersonId: s.salesperson_id,
+      salespersonName: s.users?.name,
+      amount: Number(s.amount || 0),
+      paymentMode: s.payment_mode,
+      referenceNumber: s.reference_number,
+      notes: s.notes,
+      settledAt: s.settled_at,
+      createdAt: s.created_at,
+    }));
 
     return NextResponse.json({
-      settlements: settlementList.map(s => ({
-        ...s,
-        amount: Number(s.amount),
-      })),
-      pagination: {
-        page,
-        limit,
-        total: Number(countResult[0]?.count || 0),
-        totalPages: Math.ceil(Number(countResult[0]?.count || 0) / limit),
-      },
+      settlements: formatted,
+      pagination: { page, limit, total: count || 0, totalPages: Math.ceil((count || 0) / limit) },
     });
   } catch (error) {
     console.error('Settlements fetch error:', error);
@@ -73,9 +54,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const user = await getCurrentUser();
-    if (!user) {
-      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
-    }
+    if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
 
     const body = await request.json();
     const { orderId, amount, paymentMode, cashAmount, onlineAmount, denominations, clearingDays, referenceNumber, notes } = body;
@@ -87,21 +66,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const [orderWithCustomer] = await db
-      .select({
-        order: orders,
-        customerName: customers.name,
-      })
-      .from(orders)
-      .innerJoin(customers, eq(orders.customerId, customers.id))
-      .where(eq(orders.id, orderId));
+    const { data: orderData, error } = await supabaseAdmin
+      .from('orders')
+      .select('*, customers(name)')
+      .eq('id', orderId)
+      .single();
 
-    if (!orderWithCustomer) {
-      return NextResponse.json({ error: 'Order not found' }, { status: 404 });
-    }
+    if (error || !orderData) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
 
-    const { order, customerName } = orderWithCustomer;
-    const currentBalance = Number(order.balance);
+    const currentBalance = Number(orderData.balance || 0);
     if (amount > currentBalance + 0.5) {
       return NextResponse.json(
         { error: `Amount exceeds balance (₹${currentBalance.toFixed(2)})` },
@@ -109,37 +82,46 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const [newSettlement] = await db.insert(settlements).values({
-      orderId,
-      customerId: order.customerId,
-      salespersonId: user.id,
-      amount: amount.toString(),
-      cashAmount: (cashAmount || 0).toString(),
-      onlineAmount: (onlineAmount || 0).toString(),
-      paymentMode,
-      denominations: denominations || null,
-      clearingDays: parseInt(clearingDays) || 0,
-      referenceNumber,
-      notes: notes || null,
-    }).returning();
+    const { data: newSettlement, error: insertError } = await supabaseAdmin
+      .from('settlements')
+      .insert({
+        order_id: orderId,
+        customer_id: orderData.customer_id,
+        salesperson_id: user.id,
+        amount: amount.toString(),
+        cash_amount: (cashAmount || 0).toString(),
+        online_amount: (onlineAmount || 0).toString(),
+        payment_mode: paymentMode,
+        denominations: denominations || null,
+        clearing_days: clearingDays ? parseInt(clearingDays) : 0,
+        reference_number: referenceNumber || null,
+        notes: notes || null,
+      })
+      .select()
+      .single();
 
-    const newAmountPaid = Number(order.amountPaid) + amount;
-    const newBalance = Math.max(0, Number(order.grandTotal) - newAmountPaid);
+    if (insertError) throw insertError;
+
+    const newAmountPaid = Number(orderData.amount_paid || 0) + amount;
+    const newBalance = Math.max(0, Number(orderData.grand_total || 0) - newAmountPaid);
     const newStatus = newBalance <= 0 ? 'settled' : (newAmountPaid > 0 ? 'partial' : 'pending');
 
-    await db.update(orders).set({
-      amountPaid: newAmountPaid.toFixed(2),
-      balance: newBalance.toFixed(2),
-      settlementStatus: newStatus,
-    }).where(eq(orders.id, orderId));
+    await supabaseAdmin
+      .from('orders')
+      .update({
+        amount_paid: newAmountPaid.toFixed(2),
+        balance: newBalance.toFixed(2),
+        settlement_status: newStatus,
+      })
+      .eq('id', orderId);
 
-    await db.insert(activityLogs).values({
-      userId: user.id,
-      activityType: 'settlement',
-      entityType: 'settlement',
-      entityId: newSettlement.id,
-      description: `Bill Punched: Collected ₹${amount} from ${customerName} for ${order.invoiceNumber} (${paymentMode})`,
-      metadata: { orderId, amount, paymentMode, shop: customerName, invoice: order.invoiceNumber, denominations },
+    await supabaseAdmin.from('activity_logs').insert({
+      user_id: user.id,
+      activity_type: 'settlement',
+      entity_type: 'settlement',
+      entity_id: newSettlement.id,
+      description: `Bill Punched: Collected ₹${amount} from ${orderData.customers?.name || 'customer'} for ${orderData.invoice_number} (${paymentMode})`,
+      metadata: { orderId, amount, paymentMode, shop: orderData.customers?.name, invoice: orderData.invoice_number, denominations },
     });
 
     return NextResponse.json({ settlement: newSettlement }, { status: 201 });

@@ -1,8 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/db';
-import { users, activityLogs } from '@/db/schema';
-import { eq } from 'drizzle-orm';
-import { hashPassword } from '@/lib/auth';
+import { supabaseAdmin } from '@/db';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,36 +17,26 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid role selected' }, { status: 400 });
     }
 
-    const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, email.toLowerCase())).limit(1);
-    if (existing.length > 0) {
-      return NextResponse.json({ error: 'Email already exists' }, { status: 409 });
-    }
-
-    const [newUser] = await db.insert(users).values({
-      email: email.toLowerCase(),
-      password: hashPassword(password),
-      name,
-      role: role as 'admin' | 'salesperson',
-      phone: phone || null,
-    }).returning();
-
-    await db.insert(activityLogs).values({
-      userId: newUser.id,
-      activityType: 'login',
-      entityType: 'user',
-      entityId: newUser.id,
-      description: `New account created: ${newUser.email} (${role})`,
+    const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: { name, role, phone },
     });
+
+    if (authError || !authData.user) {
+      return NextResponse.json({ error: authError?.message || 'Failed to create account' }, { status: 500 });
+    }
 
     return NextResponse.json({
       message: 'Account created successfully',
       user: {
-        id: newUser.id,
-        email: newUser.email,
-        name: newUser.name,
-        role: newUser.role,
-        phone: newUser.phone,
-      }
+        id: parseInt(authData.user.id),
+        email: authData.user.email!,
+        name,
+        role,
+        phone: phone || null,
+      },
     }, { status: 201 });
   } catch (error) {
     console.error('Signup error:', error);

@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/db';
-import { customers, orders, activityLogs } from '@/db/schema';
-import { eq, desc, sql, and, ilike, gte, lte } from 'drizzle-orm';
+import { supabaseAdmin } from '@/db';
 import { getCurrentUser } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
@@ -9,9 +7,7 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: NextRequest) {
   try {
     const user = await getCurrentUser();
-    if (!user) {
-      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
-    }
+    if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
 
     const { searchParams } = new URL(request.url);
     const search = searchParams.get('search') || '';
@@ -20,41 +16,29 @@ export async function GET(request: NextRequest) {
     const offset = (page - 1) * limit;
     const isAdmin = user.role === 'admin';
 
-    const customerList = await db
-      .select({
-        id: customers.id,
-        name: customers.name,
-        phone: customers.phone,
-        email: customers.email,
-        gstin: customers.gstin,
-        pan: customers.pan,
-        address: customers.address,
-        city: customers.city,
-        state: customers.state,
-        pincode: customers.pincode,
-        beat: customers.beat,
-        creditLimit: customers.creditLimit,
-        outstandingBalance: customers.outstandingBalance,
-        assignedSalespersonId: customers.assignedSalespersonId,
-        isActive: customers.isActive,
-        createdAt: customers.createdAt,
-      })
-      .from(customers)
-      .orderBy(desc(customers.createdAt))
-      .limit(limit)
-      .offset(offset);
+    let query = supabaseAdmin
+      .from('customers')
+      .select('*', { count: 'exact' });
 
-    let total = customerList.length;
-    if (isAdmin) {
-      const [countRow] = await db.select({ count: sql<number>`count(*)` }).from(customers);
-      total = Number(countRow?.count || 0);
+    if (!isAdmin) {
+      query = query.eq('assigned_salesperson_id', user.id);
     }
 
-    const formattedCustomers = customerList.map(c => ({
+    if (search) {
+      query = query.or(`name.ilike.%${search}%,phone.ilike.%${search}%,gstin.ilike.%${search}%`);
+    }
+
+    const { data: customerList, count, error } = await query
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+
+    if (error) throw error;
+
+    const formattedCustomers = (customerList || []).map((c: any) => ({
       ...c,
       salespersonName: null,
-      creditLimit: Number(c.creditLimit),
-      outstandingBalance: Number(c.outstandingBalance),
+      creditLimit: Number(c.credit_limit || 0),
+      outstandingBalance: Number(c.outstanding_balance || 0),
     }));
 
     return NextResponse.json({
@@ -62,8 +46,8 @@ export async function GET(request: NextRequest) {
       pagination: {
         page,
         limit,
-        total,
-        totalPages: Math.ceil(total / limit),
+        total: count || 0,
+        totalPages: Math.ceil((count || 0) / limit),
       },
     });
   } catch (error) {
@@ -75,9 +59,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const user = await getCurrentUser();
-    if (!user) {
-      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
-    }
+    if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
 
     const body = await request.json();
     const {
@@ -95,30 +77,34 @@ export async function POST(request: NextRequest) {
       assignedSalespersonId,
     } = body;
 
-    if (!name) {
-      return NextResponse.json({ error: 'Customer name is required' }, { status: 400 });
-    }
+    if (!name) return NextResponse.json({ error: 'Customer name is required' }, { status: 400 });
 
-    const [newCustomer] = await db.insert(customers).values({
-      name,
-      phone,
-      email,
-      gstin,
-      pan,
-      address,
-      city,
-      state,
-      pincode,
-      beat,
-      creditLimit: creditLimit?.toString() || '0',
-      assignedSalespersonId: assignedSalespersonId || (user.role === 'salesperson' ? user.id : null),
-    }).returning();
+    const { data: newCustomer, error } = await supabaseAdmin
+      .from('customers')
+      .insert({
+        name,
+        phone,
+        email,
+        gstin,
+        pan,
+        address,
+        city,
+        state,
+        pincode,
+        beat,
+        credit_limit: creditLimit?.toString() || '0',
+        assigned_salesperson_id: assignedSalespersonId || (user.role === 'salesperson' ? user.id : null),
+      })
+      .select()
+      .single();
 
-    await db.insert(activityLogs).values({
-      userId: user.id,
-      activityType: 'customer_added',
-      entityType: 'customer',
-      entityId: newCustomer.id,
+    if (error) throw error;
+
+    await supabaseAdmin.from('activity_logs').insert({
+      user_id: user.id,
+      activity_type: 'customer_added',
+      entity_type: 'customer',
+      entity_id: newCustomer.id,
       description: `Added customer ${name}`,
     });
 

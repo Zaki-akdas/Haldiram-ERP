@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/db';
-import { sessions, activityLogs } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import { supabaseAdmin } from '@/db';
 import { getCurrentUser } from '@/lib/auth';
 
 export async function POST(request: NextRequest) {
@@ -12,16 +10,18 @@ export async function POST(request: NextRequest) {
     if (token) {
       const user = await getCurrentUser();
 
-      await db.delete(sessions).where(eq(sessions.token, token));
-
       if (user) {
-        await db.insert(activityLogs).values({
-          userId: user.id,
-          activityType: 'logout',
-          description: `User ${user.name} logged out`,
-          ipAddress: request.headers.get('x-forwarded-for') || 'unknown',
-        });
+        await supabaseAdmin
+          .from('activity_logs')
+          .insert({
+            user_id: user.id,
+            activity_type: 'logout',
+            description: `User ${user.name} logged out`,
+            ip_address: request.headers.get('x-forwarded-for') || 'unknown',
+          });
       }
+
+      await supabaseAdmin.auth.signOut({ scope: 'global' });
     }
 
     return NextResponse.json({ success: true });

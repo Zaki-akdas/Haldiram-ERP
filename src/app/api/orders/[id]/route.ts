@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/db';
-import { orders, orderItems, customers, users, settlements, activityLogs } from '@/db/schema';
-import { eq, and, desc } from 'drizzle-orm';
+import { supabaseAdmin } from '@/db';
 import { getCurrentUser } from '@/lib/auth';
 
 export async function GET(
@@ -10,89 +8,68 @@ export async function GET(
 ) {
   try {
     const user = await getCurrentUser();
-    if (!user) {
-      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
-    }
+    if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
 
     const { id } = await params;
     const orderId = parseInt(id, 10);
 
-    if (isNaN(orderId)) {
-      return NextResponse.json({ error: 'Invalid order ID' }, { status: 400 });
-    }
+    if (isNaN(orderId)) return NextResponse.json({ error: 'Invalid order ID' }, { status: 400 });
 
     const isAdmin = user.role === 'admin';
 
-    const [order] = await db
-      .select({
-        id: orders.id,
-        invoiceNumber: orders.invoiceNumber,
-        customerId: orders.customerId,
-        customerName: customers.name,
-        customerPhone: customers.phone,
-        customerAddress: customers.address,
-        salespersonId: orders.salespersonId,
-        salespersonName: users.name,
-        orderDate: orders.orderDate,
-        deliveryDate: orders.deliveryDate,
-        status: orders.status,
-        subtotal: orders.subtotal,
-        taxableAmount: orders.taxableAmount,
-        cgst: orders.cgst,
-        sgst: orders.sgst,
-        igst: orders.igst,
-        totalGst: orders.totalGst,
-        grandTotal: orders.grandTotal,
-        amountPaid: orders.amountPaid,
-        balance: orders.balance,
-        settlementStatus: orders.settlementStatus,
-        beat: orders.beat,
-        notes: orders.notes,
-        metadata: orders.metadata,
-        createdAt: orders.createdAt,
-      })
-      .from(orders)
-      .innerJoin(customers, eq(orders.customerId, customers.id))
-      .innerJoin(users, eq(orders.salespersonId, users.id))
-      .where(
-        and(
-          eq(orders.id, orderId),
-          !isAdmin ? eq(orders.salespersonId, user.id) : undefined
-        )
-      );
+    let query = supabaseAdmin
+      .from('orders')
+      .select('*, customers(name, phone, address), users(name)')
+      .eq('id', orderId);
 
-    if (!order) {
-      return NextResponse.json({ error: 'Order not found' }, { status: 404 });
-    }
+    if (!isAdmin) query = query.eq('salesperson_id', user.id);
 
-    const items = await db.select().from(orderItems).where(eq(orderItems.orderId, orderId));
-    const orderSettlements = await db.select().from(settlements).where(eq(settlements.orderId, orderId));
+    const { data: order, error } = await query.single();
+    if (error || !order) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
+
+    const { data: items } = await supabaseAdmin.from('order_items').select('*').eq('order_id', orderId);
+    const { data: settlements } = await supabaseAdmin.from('settlements').select('*').eq('order_id', orderId);
 
     return NextResponse.json({
       order: {
-        ...order,
-        subtotal: Number(order.subtotal),
-        taxableAmount: Number(order.taxableAmount),
-        cgst: Number(order.cgst),
-        sgst: Number(order.sgst),
-        igst: Number(order.igst),
-        totalGst: Number(order.totalGst),
-        grandTotal: Number(order.grandTotal),
-        amountPaid: Number(order.amountPaid),
-        balance: Number(order.balance),
+        id: order.id,
+        invoiceNumber: order.invoice_number,
+        customerId: order.customer_id,
+        customerName: order.customers?.name,
+        customerPhone: order.customers?.phone,
+        customerAddress: order.customers?.address,
+        salespersonId: order.salesperson_id,
+        salespersonName: order.users?.name,
+        orderDate: order.order_date,
+        deliveryDate: order.delivery_date,
+        status: order.status,
+        subtotal: Number(order.subtotal || 0),
+        taxableAmount: Number(order.taxable_amount || 0),
+        cgst: Number(order.cgst || 0),
+        sgst: Number(order.sgst || 0),
+        igst: Number(order.igst || 0),
+        totalGst: Number(order.total_gst || 0),
+        grandTotal: Number(order.grand_total || 0),
+        amountPaid: Number(order.amount_paid || 0),
+        balance: Number(order.balance || 0),
+        settlementStatus: order.settlement_status,
+        beat: order.beat,
+        notes: order.notes,
+        metadata: order.metadata,
+        createdAt: order.created_at,
       },
-      items: items.map(i => ({
+      items: (items || []).map((i: any) => ({
         ...i,
-        unitPrice: Number(i.unitPrice),
-        discount: Number(i.discount),
-        taxableAmount: Number(i.taxableAmount),
-        gstRate: Number(i.gstRate),
-        gstAmount: Number(i.gstAmount),
-        totalAmount: Number(i.totalAmount),
+        unitPrice: Number(i.unit_price || 0),
+        discount: Number(i.discount || 0),
+        taxableAmount: Number(i.taxable_amount || 0),
+        gstRate: Number(i.gst_rate || 0),
+        gstAmount: Number(i.gst_amount || 0),
+        totalAmount: Number(i.total_amount || 0),
       })),
-      settlements: orderSettlements.map(s => ({
+      settlements: (settlements || []).map((s: any) => ({
         ...s,
-        amount: Number(s.amount),
+        amount: Number(s.amount || 0),
       })),
     });
   } catch (error) {
@@ -107,37 +84,36 @@ export async function PATCH(
 ) {
   try {
     const user = await getCurrentUser();
-    if (!user) {
-      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
-    }
+    if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
 
     const { id } = await params;
     const orderId = parseInt(id, 10);
 
-    if (isNaN(orderId)) {
-      return NextResponse.json({ error: 'Invalid order ID' }, { status: 400 });
-    }
+    if (isNaN(orderId)) return NextResponse.json({ error: 'Invalid order ID' }, { status: 400 });
 
     const body = await request.json();
     const { status, deliveryDate, notes } = body;
 
-    const updateData: Record<string, unknown> = { updatedAt: new Date() };
+    const updateData: Record<string, unknown> = { updated_at: new Date().toISOString() };
     if (status) updateData.status = status;
-    if (deliveryDate) updateData.deliveryDate = new Date(deliveryDate);
+    if (deliveryDate) updateData.delivery_date = new Date(deliveryDate).toISOString();
     if (notes !== undefined) updateData.notes = notes;
 
-    const [updated] = await db.update(orders).set(updateData).where(eq(orders.id, orderId)).returning();
+    const { data: updated, error } = await supabaseAdmin
+      .from('orders')
+      .update(updateData)
+      .eq('id', orderId)
+      .select()
+      .single();
 
-    if (!updated) {
-      return NextResponse.json({ error: 'Order not found' }, { status: 404 });
-    }
+    if (error || !updated) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
 
-    await db.insert(activityLogs).values({
-      userId: user.id,
-      activityType: 'order_updated',
-      entityType: 'order',
-      entityId: orderId,
-      description: `Updated order ${updated.invoiceNumber}`,
+    await supabaseAdmin.from('activity_logs').insert({
+      user_id: user.id,
+      activity_type: 'order_updated',
+      entity_type: 'order',
+      entity_id: orderId,
+      description: `Updated order ${updated.invoice_number}`,
       metadata: body,
     });
 
@@ -161,25 +137,26 @@ export async function DELETE(
     const { id } = await params;
     const orderId = parseInt(id, 10);
 
-    if (isNaN(orderId)) {
-      return NextResponse.json({ error: 'Invalid order ID' }, { status: 400 });
-    }
+    if (isNaN(orderId)) return NextResponse.json({ error: 'Invalid order ID' }, { status: 400 });
 
-    await db.delete(orderItems).where(eq(orderItems.orderId, orderId));
-    await db.delete(settlements).where(eq(settlements.orderId, orderId));
+    await supabaseAdmin.from('order_items').delete().eq('order_id', orderId);
+    await supabaseAdmin.from('settlements').delete().eq('order_id', orderId);
 
-    const [deleted] = await db.delete(orders).where(eq(orders.id, orderId)).returning();
+    const { data: deleted, error } = await supabaseAdmin
+      .from('orders')
+      .delete()
+      .eq('id', orderId)
+      .select()
+      .single();
 
-    if (!deleted) {
-      return NextResponse.json({ error: 'Order not found' }, { status: 404 });
-    }
+    if (error || !deleted) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
 
-    await db.insert(activityLogs).values({
-      userId: user.id,
-      activityType: 'order_updated',
-      entityType: 'order',
-      entityId: orderId,
-      description: `Deleted order ${deleted.invoiceNumber}`,
+    await supabaseAdmin.from('activity_logs').insert({
+      user_id: user.id,
+      activity_type: 'order_updated',
+      entity_type: 'order',
+      entity_id: orderId,
+      description: `Deleted order ${deleted.invoice_number}`,
     });
 
     return NextResponse.json({ success: true });

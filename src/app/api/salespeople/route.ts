@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/db';
-import { users, orders, customers } from '@/db/schema';
-import { eq, desc, sql, and, gte } from 'drizzle-orm';
+import { supabaseAdmin } from '@/db';
 import { getCurrentUser } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
@@ -17,33 +15,63 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
     }
 
-    const startOfMonth = new Date();
-    startOfMonth.setDate(1);
-    startOfMonth.setHours(0, 0, 0, 0);
+    const { data: salespeopleData } = await supabaseAdmin
+      .from('users')
+      .select('*')
+      .eq('role', 'salesperson');
 
-    const salespeople = await db
-      .select({
-        id: users.id,
-        email: users.email,
-        name: users.name,
-        phone: users.phone,
-        isActive: users.isActive,
-        createdAt: users.createdAt,
-        totalOrders: sql<number>`count(DISTINCT ${orders.id})`,
-        monthlyOrders: sql<number>`count(DISTINCT ${orders.id}) filter (where ${orders.orderDate} >= ${startOfMonth})`,
-        totalRevenue: sql<number>`coalesce(sum(${orders.grandTotal}), 0)`,
-        monthlyRevenue: sql<number>`coalesce(sum(${orders.grandTotal}) filter (where ${orders.orderDate} >= ${startOfMonth}), 0)`,
-        totalCustomers: sql<number>`count(DISTINCT ${customers.id})`,
-      })
-      .from(users)
-      .leftJoin(orders, eq(orders.salespersonId, users.id))
-      .leftJoin(customers, eq(customers.assignedSalespersonId, users.id))
-      .where(eq(users.role, 'salesperson'))
-      .groupBy(users.id)
-      .orderBy(desc(sql`coalesce(sum(${orders.grandTotal}), 0)`));
+    const result: any[] = [];
+    for (const sp of salespeopleData || []) {
+      const { count: totalOrdersCount } = await supabaseAdmin
+        .from('orders')
+        .select('*', { count: 'exact', head: true })
+        .eq('salesperson_id', sp.id);
+
+      const { count: monthlyOrdersCount } = await supabaseAdmin
+        .from('orders')
+        .select('*', { count: 'exact', head: true })
+        .eq('salesperson_id', sp.id)
+        .gte('order_date', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString());
+
+      const { data: revenueData } = await supabaseAdmin
+        .from('orders')
+        .select('grand_total')
+        .eq('salesperson_id', sp.id);
+
+      const totalRevenue = revenueData?.reduce((sum, o) => sum + Number(o.grand_total || 0), 0) || 0;
+
+      const { data: monthlyRevenueData } = await supabaseAdmin
+        .from('orders')
+        .select('grand_total')
+        .eq('salesperson_id', sp.id)
+        .gte('order_date', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString());
+
+      const monthlyRevenue = monthlyRevenueData?.reduce((sum, o) => sum + Number(o.grand_total || 0), 0) || 0;
+
+      const { count: totalCustomersCount } = await supabaseAdmin
+        .from('customers')
+        .select('*', { count: 'exact', head: true })
+        .eq('assigned_salesperson_id', sp.id);
+
+      result.push({
+        id: sp.id,
+        email: sp.email,
+        name: sp.name,
+        phone: sp.phone,
+        isActive: sp.is_active,
+        createdAt: sp.created_at,
+        totalOrders: totalOrdersCount || 0,
+        monthlyOrders: monthlyOrdersCount || 0,
+        totalRevenue,
+        monthlyRevenue,
+        totalCustomers: totalCustomersCount || 0,
+      });
+    }
+
+    result.sort((a, b) => b.totalRevenue - a.totalRevenue);
 
     return NextResponse.json({
-      salespeople: salespeople.map(sp => ({
+      salespeople: result.map(sp => ({
         ...sp,
         totalRevenue: Number(sp.totalRevenue),
         monthlyRevenue: Number(sp.monthlyRevenue),
@@ -76,31 +104,30 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const existing = await db
-      .select({ id: users.id })
-      .from(users)
-      .where(eq(users.email, email.toLowerCase()))
+    const { data: existing } = await supabaseAdmin
+      .from('users')
+      .select('id')
+      .eq('email', email.toLowerCase())
       .limit(1);
 
-    if (existing.length > 0) {
+    if (existing && existing.length > 0) {
       return NextResponse.json({ error: 'Email already exists' }, { status: 400 });
     }
 
-    const [newUser] = await db.insert(users).values({
-      email: email.toLowerCase(),
-      password,
-      name,
-      phone,
-      role: 'salesperson',
-    }).returning({
-      id: users.id,
-      email: users.email,
-      name: users.name,
-      phone: users.phone,
-      role: users.role,
-      isActive: users.isActive,
-      createdAt: users.createdAt,
-    });
+    const { data: newUser, error } = await supabaseAdmin
+      .from('users')
+      .insert({
+        email: email.toLowerCase(),
+        password,
+        name,
+        phone,
+        role: 'salesperson',
+        is_active: true,
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
 
     return NextResponse.json({ user: newUser }, { status: 201 });
   } catch (error) {

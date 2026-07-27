@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/db';
-import { orderItems, orders } from '@/db/schema';
-import { eq, desc, sql } from 'drizzle-orm';
+import { supabaseAdmin } from '@/db';
 import { getCurrentUser } from '@/lib/auth';
 
 export async function GET(
@@ -17,20 +15,16 @@ export async function GET(
 
     if (isNaN(customerId)) return NextResponse.json({ error: 'Invalid ID' }, { status: 400 });
 
-    const history = await db
-      .select({
-        productName: orderItems.productName,
-        erpId: orderItems.erpId,
-        unitPrice: orderItems.unitPrice,
-        gstRate: orderItems.gstRate,
-      })
-      .from(orderItems)
-      .innerJoin(orders, eq(orderItems.orderId, orders.id))
-      .where(eq(orders.customerId, customerId))
-      .orderBy(desc(orders.orderDate))
+    const { data: history, error } = await supabaseAdmin
+      .from('order_items')
+      .select('product_name, erp_id, unit_price, gst_rate, orders!inner(order_date)')
+      .eq('orders.customer_id', customerId)
+      .order('orders.order_date', { ascending: false })
       .limit(20);
 
-    const uniqueItems = Array.from(new Map(history.map(item => [item.erpId || item.productName, item])).values());
+    if (error) throw error;
+
+    const uniqueItems = Array.from(new Map((history || []).map((item: any) => [item.erp_id || item.product_name, item])).values());
 
     return NextResponse.json({ items: uniqueItems });
   } catch (error) {

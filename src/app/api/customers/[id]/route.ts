@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/db';
-import { customers, orders, orderItems, settlements, activityLogs } from '@/db/schema';
-import { eq, desc, sql, and } from 'drizzle-orm';
+import { supabaseAdmin } from '@/db';
 import { getCurrentUser } from '@/lib/auth';
 
 export async function PATCH(
@@ -18,12 +16,17 @@ export async function PATCH(
     const customerId = parseInt(id, 10);
     const body = await request.json();
 
-    const [updated] = await db.update(customers).set({
-      ...body,
-      updatedAt: new Date(),
-    }).where(eq(customers.id, customerId)).returning();
+    const { data: updated, error } = await supabaseAdmin
+      .from('customers')
+      .update({
+        ...body,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', customerId)
+      .select()
+      .single();
 
-    if (!updated) return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
+    if (error || !updated) return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
 
     return NextResponse.json({ customer: updated });
   } catch (error) {
@@ -44,29 +47,34 @@ export async function DELETE(
     const { id } = await params;
     const customerId = parseInt(id, 10);
 
-    if (isNaN(customerId)) {
-      return NextResponse.json({ error: 'Invalid customer ID' }, { status: 400 });
-    }
+    if (isNaN(customerId)) return NextResponse.json({ error: 'Invalid customer ID' }, { status: 400 });
 
-    const existingOrders = await db.select({ id: orders.id }).from(orders).where(eq(orders.customerId, customerId)).limit(1);
+    const { data: existingOrders } = await supabaseAdmin
+      .from('orders')
+      .select('id')
+      .eq('customer_id', customerId)
+      .limit(1);
 
-    if (existingOrders.length > 0) {
+    if (existingOrders && existingOrders.length > 0) {
       return NextResponse.json({
         error: 'Cannot delete customer with existing orders. Delete orders first.',
       }, { status: 400 });
     }
 
-    const [deleted] = await db.delete(customers).where(eq(customers.id, customerId)).returning();
+    const { data: deleted, error } = await supabaseAdmin
+      .from('customers')
+      .delete()
+      .eq('id', customerId)
+      .select()
+      .single();
 
-    if (!deleted) {
-      return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
-    }
+    if (error || !deleted) return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
 
-    await db.insert(activityLogs).values({
-      userId: user.id,
-      activityType: 'customer_added',
-      entityType: 'customer',
-      entityId: customerId,
+    await supabaseAdmin.from('activity_logs').insert({
+      user_id: user.id,
+      activity_type: 'customer_added',
+      entity_type: 'customer',
+      entity_id: customerId,
       description: `Deleted customer ${deleted.name}`,
     });
 
