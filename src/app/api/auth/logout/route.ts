@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/db';
+import { getSupabaseAdmin } from '@/db';
 import { getCurrentUser } from '@/lib/auth';
 
 export async function POST(request: NextRequest) {
   try {
+    const supabase = getSupabaseAdmin();
     const authHeader = request.headers.get('authorization');
     const token = authHeader?.replace(/^Bearer\s+/i, '');
 
@@ -11,7 +12,7 @@ export async function POST(request: NextRequest) {
       const user = await getCurrentUser();
 
       if (user) {
-        await supabaseAdmin
+        await supabase
           .from('activity_logs')
           .insert({
             user_id: user.id,
@@ -21,7 +22,7 @@ export async function POST(request: NextRequest) {
           });
       }
 
-      await supabaseAdmin.auth.signOut({ scope: 'global' });
+      await supabase.auth.signOut({ scope: 'global' });
     }
 
     return NextResponse.json({ success: true });

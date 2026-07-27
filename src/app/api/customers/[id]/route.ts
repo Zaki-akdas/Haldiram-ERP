@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/db';
+import { getSupabaseAdmin } from '@/db';
 import { getCurrentUser } from '@/lib/auth';
 
 export async function PATCH(
@@ -7,6 +7,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const supabase = getSupabaseAdmin();
     const user = await getCurrentUser();
     if (!user || (user.role !== 'admin' && user.role !== 'manager')) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
@@ -16,11 +17,10 @@ export async function PATCH(
     const customerId = parseInt(id, 10);
     const body = await request.json();
 
-    const { data: updated, error } = await supabaseAdmin
+    const { data: updated, error } = await supabase
       .from('customers')
       .update({
         ...body,
-        updated_at: new Date().toISOString(),
       })
       .eq('id', customerId)
       .select()
@@ -39,6 +39,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const supabase = getSupabaseAdmin();
     const user = await getCurrentUser();
     if (!user || (user.role !== 'admin' && user.role !== 'manager')) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
@@ -49,7 +50,7 @@ export async function DELETE(
 
     if (isNaN(customerId)) return NextResponse.json({ error: 'Invalid customer ID' }, { status: 400 });
 
-    const { data: existingOrders } = await supabaseAdmin
+    const { data: existingOrders } = await supabase
       .from('orders')
       .select('id')
       .eq('customer_id', customerId)
@@ -61,7 +62,7 @@ export async function DELETE(
       }, { status: 400 });
     }
 
-    const { data: deleted, error } = await supabaseAdmin
+    const { data: deleted, error } = await supabase
       .from('customers')
       .delete()
       .eq('id', customerId)
@@ -70,7 +71,7 @@ export async function DELETE(
 
     if (error || !deleted) return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
 
-    await supabaseAdmin.from('activity_logs').insert({
+    await supabase.from('activity_logs').insert({
       user_id: user.id,
       activity_type: 'customer_added',
       entity_type: 'customer',

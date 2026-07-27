@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/db';
+import { getSupabaseAdmin } from '@/db';
 import { getCurrentUser } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
+    const supabase = getSupabaseAdmin();
     const user = await getCurrentUser();
     if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
 
@@ -15,9 +16,9 @@ export async function GET(request: NextRequest) {
     const offset = (page - 1) * limit;
     const isAdmin = user.role === 'admin';
 
-    let query = supabaseAdmin
+    let query = supabase
       .from('settlements')
-      .select('*, orders(invoice_number), customers(name), users!settlements_salesperson_id_fkey(name)', { count: 'exact' })
+      .select('*', { count: 'exact' })
       .order('settled_at', { ascending: false });
 
     if (!isAdmin) query = query.eq('salesperson_id', user.id);
@@ -25,20 +26,31 @@ export async function GET(request: NextRequest) {
     const { data: settlementList, count, error } = await query.range(offset, offset + limit - 1);
     if (error) throw error;
 
+    const orderIds = [...new Set((settlementList || []).map((s: any) => s.order_id).filter(Boolean))];
+    const customerIds = [...new Set((settlementList || []).map((s: any) => s.customer_id).filter(Boolean))];
+    const salespersonIds = [...new Set((settlementList || []).map((s: any) => s.salesperson_id).filter(Boolean))];
+
+    const { data: ordersData } = await supabase.from('orders').select('id, invoice_number').in('id', orderIds);
+    const { data: customersData } = await supabase.from('customers').select('id, name').in('id', customerIds);
+    const { data: usersData } = await supabase.from('users').select('id, name').in('id', salespersonIds);
+
+    const orderMap: Map<number, any> = new Map((ordersData || []).map((o: any) => [o.id, o]));
+    const customerMap: Map<number, any> = new Map((customersData || []).map((c: any) => [c.id, c]));
+    const userMap: Map<number, any> = new Map((usersData || []).map((u: any) => [u.id, u]));
+
     const formatted = (settlementList || []).map((s: any) => ({
       id: s.id,
       orderId: s.order_id,
-      invoiceNumber: s.orders?.invoice_number,
+      invoiceNumber: orderMap.get(s.order_id)?.invoice_number,
       customerId: s.customer_id,
-      customerName: s.customers?.name,
+      customerName: customerMap.get(s.customer_id)?.name,
       salespersonId: s.salesperson_id,
-      salespersonName: s.users?.name,
+      salespersonName: userMap.get(s.salesperson_id)?.name,
       amount: Number(s.amount || 0),
       paymentMode: s.payment_mode,
       referenceNumber: s.reference_number,
       notes: s.notes,
       settledAt: s.settled_at,
-      createdAt: s.created_at,
     }));
 
     return NextResponse.json({
@@ -53,6 +65,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const supabase = getSupabaseAdmin();
     const user = await getCurrentUser();
     if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
 
@@ -66,13 +79,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { data: orderData, error } = await supabaseAdmin
+    const { data: orderData, error } = await supabase
       .from('orders')
-      .select('*, customers(name)')
+      .select('id, customer_id, amount_paid, grand_total, invoice_number, balance')
       .eq('id', orderId)
       .single();
 
     if (error || !orderData) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
+
+    const { data: customerData } = await supabase.from('customers').select('name').eq('id', orderData.customer_id).single();
 
     const currentBalance = Number(orderData.balance || 0);
     if (amount > currentBalance + 0.5) {
@@ -82,7 +97,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { data: newSettlement, error: insertError } = await supabaseAdmin
+    const { data: newSettlement, error: insertError } = await supabase
       .from('settlements')
       .insert({
         order_id: orderId,
@@ -106,7 +121,7 @@ export async function POST(request: NextRequest) {
     const newBalance = Math.max(0, Number(orderData.grand_total || 0) - newAmountPaid);
     const newStatus = newBalance <= 0 ? 'settled' : (newAmountPaid > 0 ? 'partial' : 'pending');
 
-    await supabaseAdmin
+    await supabase
       .from('orders')
       .update({
         amount_paid: newAmountPaid.toFixed(2),
@@ -115,13 +130,13 @@ export async function POST(request: NextRequest) {
       })
       .eq('id', orderId);
 
-    await supabaseAdmin.from('activity_logs').insert({
+    await supabase.from('activity_logs').insert({
       user_id: user.id,
       activity_type: 'settlement',
       entity_type: 'settlement',
       entity_id: newSettlement.id,
-      description: `Bill Punched: Collected ₹${amount} from ${orderData.customers?.name || 'customer'} for ${orderData.invoice_number} (${paymentMode})`,
-      metadata: { orderId, amount, paymentMode, shop: orderData.customers?.name, invoice: orderData.invoice_number, denominations },
+      description: `Bill Punched: Collected ₹${amount} from ${customerData?.name || 'customer'} for ${orderData.invoice_number} (${paymentMode})`,
+      metadata: { orderId, amount, paymentMode, shop: customerData?.name, invoice: orderData.invoice_number, denominations },
     });
 
     return NextResponse.json({ settlement: newSettlement }, { status: 201 });

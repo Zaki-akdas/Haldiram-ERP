@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/db';
+import { getSupabaseAdmin } from '@/db';
 import { getCurrentUser } from '@/lib/auth';
 
 export async function GET(
@@ -7,6 +7,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const supabase = getSupabaseAdmin();
     const user = await getCurrentUser();
     if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
 
@@ -15,7 +16,7 @@ export async function GET(
 
     if (isNaN(customerId)) return NextResponse.json({ error: 'Invalid ID' }, { status: 400 });
 
-    const { data: history, error } = await supabaseAdmin
+    const { data: history, error } = await supabase
       .from('order_items')
       .select('product_name, erp_id, unit_price, gst_rate, orders!inner(order_date)')
       .eq('orders.customer_id', customerId)

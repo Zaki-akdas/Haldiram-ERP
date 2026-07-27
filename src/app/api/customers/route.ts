@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/db';
+import { getSupabaseAdmin } from '@/db';
 import { getCurrentUser } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
+    const supabase = getSupabaseAdmin();
     const user = await getCurrentUser();
     if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
 
@@ -16,7 +17,7 @@ export async function GET(request: NextRequest) {
     const offset = (page - 1) * limit;
     const isAdmin = user.role === 'admin';
 
-    let query = supabaseAdmin
+    let query = supabase
       .from('customers')
       .select('*', { count: 'exact' });
 
@@ -58,6 +59,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const supabase = getSupabaseAdmin();
     const user = await getCurrentUser();
     if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
 
@@ -70,8 +72,6 @@ export async function POST(request: NextRequest) {
       pan,
       address,
       city,
-      state,
-      pincode,
       beat,
       creditLimit,
       assignedSalespersonId,
@@ -79,7 +79,7 @@ export async function POST(request: NextRequest) {
 
     if (!name) return NextResponse.json({ error: 'Customer name is required' }, { status: 400 });
 
-    const { data: newCustomer, error } = await supabaseAdmin
+    const { data: newCustomer, error } = await supabase
       .from('customers')
       .insert({
         name,
@@ -89,8 +89,6 @@ export async function POST(request: NextRequest) {
         pan,
         address,
         city,
-        state,
-        pincode,
         beat,
         credit_limit: creditLimit?.toString() || '0',
         assigned_salesperson_id: assignedSalespersonId || (user.role === 'salesperson' ? user.id : null),
@@ -100,7 +98,7 @@ export async function POST(request: NextRequest) {
 
     if (error) throw error;
 
-    await supabaseAdmin.from('activity_logs').insert({
+    await supabase.from('activity_logs').insert({
       user_id: user.id,
       activity_type: 'customer_added',
       entity_type: 'customer',

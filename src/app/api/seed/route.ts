@@ -1,14 +1,15 @@
 import { NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/db';
+import { getSupabaseAdmin } from '@/db';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST() {
   try {
-    const { data: existing } = await supabaseAdmin.from('users').select('id').limit(1);
+    const supabase = getSupabaseAdmin();
+    const { data: existing } = await supabase.from('users').select('id').limit(1);
     if (existing && existing.length > 0) return NextResponse.json({ message: 'Database already seeded' });
 
-    const created = await supabaseAdmin.auth.admin.createUser({
+    const created = await supabase.auth.admin.createUser({
       email: 'admin@salessettle.in',
       password: 'admin123',
       email_confirm: true,

@@ -24,7 +24,14 @@ if (process.env.NODE_ENV !== "production") {
 
 export const db = drizzle(pool);
 
-export const supabaseAdmin = createClient(
-  process.env.SUPABASE_URL || '',
-  process.env.SUPABASE_SECRET_KEY || ''
-);
+let _supabaseAdmin: any = null;
+
+export function getSupabaseAdmin() {
+  if (!_supabaseAdmin) {
+    _supabaseAdmin = createClient(
+      process.env.SUPABASE_URL || '',
+      process.env.SUPABASE_SECRET_KEY || ''
+    );
+  }
+  return _supabaseAdmin;
+}

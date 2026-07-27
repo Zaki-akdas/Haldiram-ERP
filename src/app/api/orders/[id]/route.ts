@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/db';
+import { getSupabaseAdmin } from '@/db';
 import { getCurrentUser } from '@/lib/auth';
 
 export async function GET(
@@ -7,6 +7,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const supabase = getSupabaseAdmin();
     const user = await getCurrentUser();
     if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
 
@@ -17,9 +18,9 @@ export async function GET(
 
     const isAdmin = user.role === 'admin';
 
-    let query = supabaseAdmin
+    let query = supabase
       .from('orders')
-      .select('*, customers(name, phone, address), users(name)')
+      .select('*')
       .eq('id', orderId);
 
     if (!isAdmin) query = query.eq('salesperson_id', user.id);
@@ -27,27 +28,26 @@ export async function GET(
     const { data: order, error } = await query.single();
     if (error || !order) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
 
-    const { data: items } = await supabaseAdmin.from('order_items').select('*').eq('order_id', orderId);
-    const { data: settlements } = await supabaseAdmin.from('settlements').select('*').eq('order_id', orderId);
+    const { data: customer } = await supabase.from('customers').select('id, name, phone, address').eq('id', order.customer_id).single();
+    const { data: salesperson } = await supabase.from('users').select('id, name').eq('id', order.salesperson_id).single();
+
+    const { data: items } = await supabase.from('order_items').select('*').eq('order_id', orderId);
+    const { data: settlements } = await supabase.from('settlements').select('*').eq('order_id', orderId);
 
     return NextResponse.json({
       order: {
         id: order.id,
         invoiceNumber: order.invoice_number,
         customerId: order.customer_id,
-        customerName: order.customers?.name,
-        customerPhone: order.customers?.phone,
-        customerAddress: order.customers?.address,
+        customerName: customer?.name,
+        customerPhone: customer?.phone,
+        customerAddress: customer?.address,
         salespersonId: order.salesperson_id,
-        salespersonName: order.users?.name,
+        salespersonName: salesperson?.name,
         orderDate: order.order_date,
-        deliveryDate: order.delivery_date,
+        dueDate: order.due_date,
         status: order.status,
         subtotal: Number(order.subtotal || 0),
-        taxableAmount: Number(order.taxable_amount || 0),
-        cgst: Number(order.cgst || 0),
-        sgst: Number(order.sgst || 0),
-        igst: Number(order.igst || 0),
         totalGst: Number(order.total_gst || 0),
         grandTotal: Number(order.grand_total || 0),
         amountPaid: Number(order.amount_paid || 0),
@@ -55,15 +55,12 @@ export async function GET(
         settlementStatus: order.settlement_status,
         beat: order.beat,
         notes: order.notes,
-        metadata: order.metadata,
         createdAt: order.created_at,
       },
       items: (items || []).map((i: any) => ({
         ...i,
         unitPrice: Number(i.unit_price || 0),
-        discount: Number(i.discount || 0),
         taxableAmount: Number(i.taxable_amount || 0),
-        gstRate: Number(i.gst_rate || 0),
         gstAmount: Number(i.gst_amount || 0),
         totalAmount: Number(i.total_amount || 0),
       })),
@@ -83,6 +80,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const supabase = getSupabaseAdmin();
     const user = await getCurrentUser();
     if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
 
@@ -92,14 +90,14 @@ export async function PATCH(
     if (isNaN(orderId)) return NextResponse.json({ error: 'Invalid order ID' }, { status: 400 });
 
     const body = await request.json();
-    const { status, deliveryDate, notes } = body;
+    const { status, dueDate, notes } = body;
 
-    const updateData: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    const updateData: Record<string, unknown> = {};
     if (status) updateData.status = status;
-    if (deliveryDate) updateData.delivery_date = new Date(deliveryDate).toISOString();
+    if (dueDate) updateData.due_date = new Date(dueDate).toISOString();
     if (notes !== undefined) updateData.notes = notes;
 
-    const { data: updated, error } = await supabaseAdmin
+    const { data: updated, error } = await supabase
       .from('orders')
       .update(updateData)
       .eq('id', orderId)
@@ -108,7 +106,7 @@ export async function PATCH(
 
     if (error || !updated) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
 
-    await supabaseAdmin.from('activity_logs').insert({
+    await supabase.from('activity_logs').insert({
       user_id: user.id,
       activity_type: 'order_updated',
       entity_type: 'order',
@@ -129,6 +127,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const supabase = getSupabaseAdmin();
     const user = await getCurrentUser();
     if (!user || (user.role !== 'admin' && user.role !== 'manager')) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
@@ -139,10 +138,10 @@ export async function DELETE(
 
     if (isNaN(orderId)) return NextResponse.json({ error: 'Invalid order ID' }, { status: 400 });
 
-    await supabaseAdmin.from('order_items').delete().eq('order_id', orderId);
-    await supabaseAdmin.from('settlements').delete().eq('order_id', orderId);
+    await supabase.from('order_items').delete().eq('order_id', orderId);
+    await supabase.from('settlements').delete().eq('order_id', orderId);
 
-    const { data: deleted, error } = await supabaseAdmin
+    const { data: deleted, error } = await supabase
       .from('orders')
       .delete()
       .eq('id', orderId)
@@ -151,7 +150,7 @@ export async function DELETE(
 
     if (error || !deleted) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
 
-    await supabaseAdmin.from('activity_logs').insert({
+    await supabase.from('activity_logs').insert({
       user_id: user.id,
       activity_type: 'order_updated',
       entity_type: 'order',

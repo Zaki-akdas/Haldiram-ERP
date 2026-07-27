@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/db';
+import { getSupabaseAdmin } from '@/db';
 import { getCurrentUser } from '@/lib/auth';
 
 export async function PATCH(
@@ -7,6 +7,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const supabase = getSupabaseAdmin();
     const user = await getCurrentUser();
     if (!user || (user.role !== 'admin' && user.role !== 'manager')) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
@@ -16,9 +17,9 @@ export async function PATCH(
     const productId = parseInt(id, 10);
     const body = await request.json();
 
-    const { data: updated, error } = await supabaseAdmin
+    const { data: updated, error } = await supabase
       .from('products')
-      .update({ ...body, updated_at: new Date().toISOString() })
+      .update({ ...body })
       .eq('id', productId)
       .select()
       .single();
@@ -36,6 +37,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const supabase = getSupabaseAdmin();
     const user = await getCurrentUser();
     if (!user || (user.role !== 'admin' && user.role !== 'manager')) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
@@ -46,7 +48,7 @@ export async function DELETE(
 
     if (isNaN(productId)) return NextResponse.json({ error: 'Invalid product ID' }, { status: 400 });
 
-    const { data: linkedItems } = await supabaseAdmin
+    const { data: linkedItems } = await supabase
       .from('order_items')
       .select('id')
       .eq('product_id', productId)
@@ -58,7 +60,7 @@ export async function DELETE(
       }, { status: 400 });
     }
 
-    const { data: deleted, error } = await supabaseAdmin
+    const { data: deleted, error } = await supabase
       .from('products')
       .delete()
       .eq('id', productId)
@@ -67,7 +69,7 @@ export async function DELETE(
 
     if (error || !deleted) return NextResponse.json({ error: 'Product not found' }, { status: 404 });
 
-    await supabaseAdmin.from('activity_logs').insert({
+    await supabase.from('activity_logs').insert({
       user_id: user.id,
       activity_type: 'product_added',
       entity_type: 'product',

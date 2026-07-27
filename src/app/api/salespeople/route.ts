@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/db';
+import { getSupabaseAdmin } from '@/db';
 import { getCurrentUser } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
+    const supabase = getSupabaseAdmin();
     const user = await getCurrentUser();
     if (!user) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
@@ -15,40 +16,40 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
     }
 
-    const { data: salespeopleData } = await supabaseAdmin
+    const { data: salespeopleData } = await supabase
       .from('users')
       .select('*')
       .eq('role', 'salesperson');
 
     const result: any[] = [];
     for (const sp of salespeopleData || []) {
-      const { count: totalOrdersCount } = await supabaseAdmin
+      const { count: totalOrdersCount } = await supabase
         .from('orders')
         .select('*', { count: 'exact', head: true })
         .eq('salesperson_id', sp.id);
 
-      const { count: monthlyOrdersCount } = await supabaseAdmin
+      const { count: monthlyOrdersCount } = await supabase
         .from('orders')
         .select('*', { count: 'exact', head: true })
         .eq('salesperson_id', sp.id)
         .gte('order_date', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString());
 
-      const { data: revenueData } = await supabaseAdmin
+      const { data: revenueData } = await supabase
         .from('orders')
         .select('grand_total')
         .eq('salesperson_id', sp.id);
 
-      const totalRevenue = revenueData?.reduce((sum, o) => sum + Number(o.grand_total || 0), 0) || 0;
+      const totalRevenue = revenueData?.reduce((sum: number, o: any) => sum + Number(o.grand_total || 0), 0) || 0;
 
-      const { data: monthlyRevenueData } = await supabaseAdmin
+      const { data: monthlyRevenueData } = await supabase
         .from('orders')
         .select('grand_total')
         .eq('salesperson_id', sp.id)
         .gte('order_date', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString());
 
-      const monthlyRevenue = monthlyRevenueData?.reduce((sum, o) => sum + Number(o.grand_total || 0), 0) || 0;
+      const monthlyRevenue = monthlyRevenueData?.reduce((sum: number, o: any) => sum + Number(o.grand_total || 0), 0) || 0;
 
-      const { count: totalCustomersCount } = await supabaseAdmin
+      const { count: totalCustomersCount } = await supabase
         .from('customers')
         .select('*', { count: 'exact', head: true })
         .eq('assigned_salesperson_id', sp.id);
@@ -85,6 +86,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const supabase = getSupabaseAdmin();
     const user = await getCurrentUser();
     if (!user) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
@@ -104,7 +106,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { data: existing } = await supabaseAdmin
+    const { data: existing } = await supabase
       .from('users')
       .select('id')
       .eq('email', email.toLowerCase())
@@ -114,7 +116,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Email already exists' }, { status: 400 });
     }
 
-    const { data: newUser, error } = await supabaseAdmin
+    const { data: newUser, error } = await supabase
       .from('users')
       .insert({
         email: email.toLowerCase(),

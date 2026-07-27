@@ -1,20 +1,17 @@
-import { supabaseAdmin } from '@/db';
+import { getSupabaseAdmin } from '@/db';
 import { headers } from 'next/headers';
 
 export async function getCurrentUser() {
   try {
-    const headersList = await headers();
-    const authHeader = headersList.get('authorization');
-
+    const supabase = getSupabaseAdmin();
+    const hdrs = await headers();
+    const authHeader = hdrs.get('authorization');
     if (!authHeader) return null;
-
     const token = authHeader.replace(/^Bearer\s+/i, '');
     if (!token) return null;
 
-    const { data, error } = await supabaseAdmin.auth.getUser(token);
-    if (error || !data.user) {
-      return null;
-    }
+    const { data, error } = await supabase.auth.getUser(token);
+    if (error || !data.user) return null;
 
     return {
       id: parseInt(data.user.id),

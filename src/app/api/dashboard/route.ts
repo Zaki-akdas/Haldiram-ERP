@@ -1,11 +1,12 @@
 import { NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/db';
+import { getSupabaseAdmin } from '@/db';
 import { getCurrentUser } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
+    const supabase = getSupabaseAdmin();
     const user = await getCurrentUser();
     if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
 
@@ -17,7 +18,7 @@ export async function GET() {
     const isAdmin = user.role === 'admin';
     const isManager = user.role === 'manager' || user.role === 'admin';
 
-    const orderQuery = supabaseAdmin.from('orders').select('status, grand_total, amount_paid, balance, order_date');
+    const orderQuery = supabase.from('orders').select('status, grand_total, amount_paid, balance, order_date');
     if (!isAdmin) orderQuery.eq('salesperson_id', user.id);
     const { data: allOrders } = await orderQuery;
 
@@ -27,20 +28,20 @@ export async function GET() {
     const todayOrders = allOrders?.filter((o: any) => new Date(o.order_date) >= startOfToday) || [];
     const monthlyOrders = allOrders?.filter((o: any) => new Date(o.order_date) >= startOfMonth) || [];
 
-    const customerQuery = supabaseAdmin.from('customers').select('id, is_active, assigned_salesperson_id');
+    const customerQuery = supabase.from('customers').select('id, is_active, assigned_salesperson_id');
     if (!isAdmin) customerQuery.eq('assigned_salesperson_id', user.id);
     const { data: customersData } = await customerQuery;
 
-    const { count: totalProducts } = await supabaseAdmin.from('products').select('*', { count: 'exact', head: true });
-    const { count: activeProducts } = await supabaseAdmin.from('products').select('*', { count: 'exact', head: true }).eq('is_active', true);
+    const { count: totalProducts } = await supabase.from('products').select('*', { count: 'exact', head: true });
+    const { count: activeProducts } = await supabase.from('products').select('*', { count: 'exact', head: true }).eq('is_active', true);
 
-    const { data: recentOrdersData } = await supabaseAdmin
+    const { data: recentOrdersData } = await supabase
       .from('orders')
       .select('id, invoice_number, grand_total, status, order_date, customers(name)')
       .order('order_date', { ascending: false })
       .limit(5);
 
-    const { data: pendingSettlementsData } = await supabaseAdmin
+    const { data: pendingSettlementsData } = await supabase
       .from('orders')
       .select('id, invoice_number, balance, order_date, customers(name)')
       .gt('balance', 0)
@@ -49,7 +50,7 @@ export async function GET() {
 
     let salespersonStats: any[] = [];
     if (isManager) {
-      const { data: usersData } = await supabaseAdmin.from('users').select('id, name');
+      const { data: usersData } = await supabase.from('users').select('id, name');
       salespersonStats = (usersData || []).map((u: any) => {
         const salespersonOrders = allOrders?.filter((o: any) => o.salesperson_id === u.id) || [];
         const revenue = salespersonOrders.reduce((sum: number, o: any) => sum + Number(o.grand_total || 0), 0);

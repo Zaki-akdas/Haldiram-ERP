@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/db';
+import { getSupabaseAdmin } from '@/db';
 import { getCurrentUser } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
+    const supabase = getSupabaseAdmin();
     const user = await getCurrentUser();
     if (!user) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
@@ -20,7 +21,7 @@ export async function GET(request: NextRequest) {
     const isManager = user.role === 'manager' || user.role === 'admin';
 
     if (reportType === 'sales') {
-      let query = supabaseAdmin.from('orders').select('order_date, grand_total, amount_paid, salesperson_id');
+      let query = supabase.from('orders').select('order_date, grand_total, amount_paid, salesperson_id');
       if (!isAdmin) query = query.eq('salesperson_id', user.id);
       if (startDate) query = query.gte('order_date', startDate);
       if (endDate) query = query.lte('order_date', endDate);
@@ -42,7 +43,7 @@ export async function GET(request: NextRequest) {
     }
 
     if (reportType === 'collections') {
-      let query = supabaseAdmin.from('settlements').select('settled_at, amount, payment_mode, salesperson_id');
+      let query = supabase.from('settlements').select('settled_at, amount, payment_mode, salesperson_id');
       if (!isAdmin) query = query.eq('salesperson_id', user.id);
       if (startDate) query = query.gte('settled_at', startDate);
       if (endDate) query = query.lte('settled_at', endDate);
@@ -66,13 +67,13 @@ export async function GET(request: NextRequest) {
     }
 
     if (reportType === 'customers' && isManager) {
-      const { data: customersData } = await supabaseAdmin.from('customers').select('id, name, city');
+      const { data: customersData } = await supabase.from('customers').select('id, name, city');
       const result: any[] = [];
       for (const c of customersData || []) {
-        const { data: ordersData } = await supabaseAdmin.from('orders').select('grand_total, balance, order_date').eq('customer_id', c.id);
+        const { data: ordersData } = await supabase.from('orders').select('grand_total, balance, order_date').eq('customer_id', c.id);
         const totalOrders = ordersData?.length || 0;
-        const totalRevenue = ordersData?.reduce((sum, o) => sum + Number(o.grand_total || 0), 0) || 0;
-        const outstanding = ordersData?.reduce((sum, o) => sum + Number(o.balance || 0), 0) || 0;
+        const totalRevenue = ordersData?.reduce((sum: number, o: any) => sum + Number(o.grand_total || 0), 0) || 0;
+        const outstanding = ordersData?.reduce((sum: number, o: any) => sum + Number(o.balance || 0), 0) || 0;
         const lastOrder = ordersData?.length ? new Date(Math.max(...ordersData.map((o: any) => new Date(o.order_date).getTime()))).toISOString() : null;
         result.push({ id: c.id, name: c.name, city: c.city, totalOrders, totalRevenue, outstanding, lastOrder });
       }
@@ -81,18 +82,18 @@ export async function GET(request: NextRequest) {
     }
 
     if (reportType === 'salespeople' && isManager) {
-      const { data: usersData } = await supabaseAdmin.from('users').select('id, name').eq('role', 'salesperson');
+      const { data: usersData } = await supabase.from('users').select('id, name').eq('role', 'salesperson');
       const result: any[] = [];
       for (const u of usersData || []) {
-        const { data: ordersData } = await supabaseAdmin.from('orders').select('grand_total, amount_paid, balance').eq('salesperson_id', u.id);
+        const { data: ordersData } = await supabase.from('orders').select('grand_total, amount_paid, balance').eq('salesperson_id', u.id);
         result.push({
           id: u.id,
           name: u.name,
           totalOrders: ordersData?.length || 0,
-          totalRevenue: ordersData?.reduce((sum, o) => sum + Number(o.grand_total || 0), 0) || 0,
-          collected: ordersData?.reduce((sum, o) => sum + Number(o.amount_paid || 0), 0) || 0,
-          pending: ordersData?.reduce((sum, o) => sum + Number(o.balance || 0), 0) || 0,
-          avgOrderValue: ordersData?.length ? (ordersData.reduce((sum, o) => sum + Number(o.grand_total || 0), 0) / ordersData.length) : 0,
+          totalRevenue: ordersData?.reduce((sum: number, o: any) => sum + Number(o.grand_total || 0), 0) || 0,
+          collected: ordersData?.reduce((sum: number, o: any) => sum + Number(o.amount_paid || 0), 0) || 0,
+          pending: ordersData?.reduce((sum: number, o: any) => sum + Number(o.balance || 0), 0) || 0,
+          avgOrderValue: ordersData?.length ? (ordersData.reduce((sum: number, o: any) => sum + Number(o.grand_total || 0), 0) / ordersData.length) : 0,
         });
       }
       const data = result.sort((a, b) => b.totalRevenue - a.totalRevenue);

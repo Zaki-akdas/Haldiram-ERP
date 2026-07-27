@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/db';
+import { getSupabaseAdmin } from '@/db';
 import { getCurrentUser } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
@@ -16,7 +16,8 @@ export async function GET(request: NextRequest) {
     const limit = parseInt(searchParams.get('limit') || '20', 10);
     const offset = (page - 1) * limit;
 
-    let query = supabaseAdmin.from('products').select('*', { count: 'exact' });
+    const supabase = getSupabaseAdmin();
+    let query = supabase.from('products').select('*', { count: 'exact' });
     if (search) query = query.ilike('name', `%${search}%`);
     if (category) query = query.eq('category', category);
 
@@ -26,11 +27,11 @@ export async function GET(request: NextRequest) {
 
     if (error) throw error;
 
-    const { data: categoriesData } = await supabaseAdmin.from('products').select('category');
-    const categories = [...new Set(categoriesData?.map(c => c.category).filter(Boolean) || [])];
+    const { data: categoriesData } = await supabase.from('products').select('category');
+    const categories = [...new Set(categoriesData?.map((c: any) => c.category).filter(Boolean) || [])];
 
     return NextResponse.json({
-      products: (productList || []).map(p => ({
+      products: (productList || []).map((p: any) => ({
         ...p,
         mrp: Number(p.mrp),
         basePrice: Number(p.base_price),
@@ -55,18 +56,18 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { erpId, name, description, category, unit, mrp, basePrice, gstRate, hsnCode, stockQty } = body;
+    const { erpId, name, category, unit, mrp, basePrice, gstRate, hsnCode, stockQty } = body;
 
     if (!name || !mrp || !basePrice) {
       return NextResponse.json({ error: 'Name, MRP, and base price are required' }, { status: 400 });
     }
 
-    const { data: newProduct, error } = await supabaseAdmin
+    const supabase = getSupabaseAdmin();
+    const { data: newProduct, error } = await supabase
       .from('products')
       .insert({
         erp_id: erpId,
         name,
-        description,
         category,
         unit: unit || 'PCS',
         mrp: mrp.toString(),
@@ -80,7 +81,7 @@ export async function POST(request: NextRequest) {
 
     if (error) throw error;
 
-    await supabaseAdmin.from('activity_logs').insert({
+    await supabase.from('activity_logs').insert({
       user_id: user.id,
       activity_type: 'product_added',
       entity_type: 'product',
