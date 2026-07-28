@@ -714,28 +714,103 @@ async function extractTextFromPDF(buffer: Buffer): Promise<string> {
 // ────────────────────── Spreadsheet Parser (CSV / Excel) ──────────────────────
 
 function findCol(headers: string[], ...names: string[]): number {
-  return headers.findIndex(h => names.some(n => h.includes(n)));
+  for (let i = 0; i < headers.length; i++) {
+    for (const n of names) {
+      if (headers[i] === n) return i;
+      if (headers[i].endsWith('_' + n)) return i;
+      if (headers[i].includes('_' + n + '_')) return i;
+    }
+  }
+  const sorted = [...names].sort((a, b) => b.length - a.length);
+  for (const n of sorted) {
+    const idx = headers.findIndex(h => h.includes(n));
+    if (idx >= 0) return idx;
+  }
+  return -1;
+}
+
+function findColExact(headers: string[], ...names: string[]): number {
+  return headers.findIndex(h => names.includes(h));
+}
+
+function findColUnderscore(headers: string[], partial: string): number {
+  const idx = headers.findIndex(h => {
+    const parts = h.split('_');
+    return parts.includes(partial);
+  });
+  return idx;
 }
 
 function parseRows(headers: string[], rows: string[][]): FullExtraction {
   const extraction = extractAll('');
 
-  const colName = findCol(headers, 'name', 'product', 'description', 'item', 'particular');
-  const colQty = findCol(headers, 'qty', 'quantity');
-  const colRate = findCol(headers, 'rate', 'price', 'unit price', 'unit_price');
-  const colErp = findCol(headers, 'erp', 'sku', 'code', 'product id', 'product_id');
-  const colTotal = findCol(headers, 'total', 'value', 'net amount', 'net_amount', 'line total', 'amount');
-  const colGst = findCol(headers, 'gst', 'tax', 'gst%', 'gst rate', 'tax rate');
-  const colHsn = findCol(headers, 'hsn', 'hsn code', 'sac');
-  const colDisc = findCol(headers, 'disc', 'discount');
-  const colMrp = findCol(headers, 'mrp', 'list price');
-  const colTaxable = findCol(headers, 'taxable', 'net taxable', 'assessable');
-  const colCgst = findCol(headers, 'cgst');
-  const colSgst = findCol(headers, 'sgst');
-  const colGstin = findCol(headers, 'gstin', 'gst no', 'gst number');
-  const colCust = findCol(headers, 'customer', 'party', 'buyer');
-  const colInv = findCol(headers, 'invoice', 'bill no', 'inv no');
-  const colDate = findCol(headers, 'date', 'invoice date', 'bill date');
+  let colName = findColExact(headers, 'item_name', 'product_name', 'description', 'name');
+  if (colName < 0) colName = findColUnderscore(headers, 'name');
+  if (colName < 0) colName = findCol(headers, 'name', 'product', 'description', 'item', 'particular');
+
+  let colErp = findColExact(headers, 'item_erp_id', 'erp_id', 'sku', 'product_id');
+  if (colErp < 0) colErp = findColUnderscore(headers, 'erp');
+  if (colErp < 0) colErp = findCol(headers, 'erp', 'sku', 'code', 'product id', 'product_id');
+
+  let colQty = findColExact(headers, 'invoice_delivery_qty', 'qty', 'quantity');
+  if (colQty < 0) colQty = findColUnderscore(headers, 'qty');
+  if (colQty < 0) colQty = findCol(headers, 'qty', 'quantity');
+
+  let colRate = findColExact(headers, 'price_std_inr', 'ptr', 'rate', 'price', 'unit_price');
+  if (colRate < 0) colRate = findColUnderscore(headers, 'rate');
+  if (colRate < 0) colRate = findCol(headers, 'rate', 'price', 'unit price', 'unit_price');
+
+  let colTotal = findColExact(headers, 'total_value_inr', 'total_amount', 'grand_total', 'total');
+  if (colTotal < 0) colTotal = findColUnderscore(headers, 'total');
+  if (colTotal < 0) colTotal = findCol(headers, 'total', 'value', 'net amount', 'net_amount', 'line total', 'amount');
+
+  let colTaxable = findColExact(headers, 'taxable_value_inr', 'taxable_amount', 'taxable');
+  if (colTaxable < 0) colTaxable = findColUnderscore(headers, 'taxable');
+  if (colTaxable < 0) colTaxable = findCol(headers, 'taxable', 'net taxable', 'assessable');
+
+  let colGstRate = findColExact(headers, 'gst_pct', 'gst_rate', 'gst%');
+  if (colGstRate < 0) colGstRate = findColUnderscore(headers, 'gst');
+  if (colGstRate < 0) colGstRate = findCol(headers, 'gst%', 'gst rate', 'gst');
+
+  let colGstAmt = findColExact(headers, 'gst_amt_inr', 'gst_amount', 'gst amt');
+  if (colGstAmt < 0) colGstAmt = findColUnderscore(headers, 'gst');
+  if (colGstAmt < 0) colGstAmt = findCol(headers, 'gst amt', 'gst amount');
+
+  let colHsn = findColExact(headers, 'hsn_code', 'hsn', 'sac');
+  if (colHsn < 0) colHsn = findColUnderscore(headers, 'hsn');
+  if (colHsn < 0) colHsn = findCol(headers, 'hsn', 'hsn code', 'sac');
+
+  let colDisc = findColExact(headers, 'primary_dis_pct', 'discount', 'disc', 'dis_pct', 'dis_pct');
+  if (colDisc < 0) colDisc = findColUnderscore(headers, 'disc');
+  if (colDisc < 0) colDisc = findCol(headers, 'disc', 'discount');
+
+  let colMrp = findColExact(headers, 'mrp_inr', 'mrp', 'list price');
+  if (colMrp < 0) colMrp = findColUnderscore(headers, 'mrp');
+  if (colMrp < 0) colMrp = findCol(headers, 'mrp', 'list price');
+
+  let colCgst = findColExact(headers, 'cgst');
+  if (colCgst < 0) colCgst = findColUnderscore(headers, 'cgst');
+  if (colCgst < 0) colCgst = findCol(headers, 'cgst');
+
+  let colSgst = findColExact(headers, 'sgst');
+  if (colSgst < 0) colSgst = findColUnderscore(headers, 'sgst');
+  if (colSgst < 0) colSgst = findCol(headers, 'sgst');
+
+  let colGstin = findColExact(headers, 'gstin', 'gst no', 'gst number');
+  if (colGstin < 0) colGstin = findColUnderscore(headers, 'gstin');
+  if (colGstin < 0) colGstin = findCol(headers, 'gstin', 'gst no', 'gst number');
+
+  let colCust = findColExact(headers, 'customer', 'party', 'buyer');
+  if (colCust < 0) colCust = findColUnderscore(headers, 'customer');
+  if (colCust < 0) colCust = findCol(headers, 'customer', 'party', 'buyer');
+
+  let colInv = findColExact(headers, 'invoice', 'bill no', 'inv no');
+  if (colInv < 0) colInv = findColUnderscore(headers, 'invoice');
+  if (colInv < 0) colInv = findCol(headers, 'invoice', 'bill no', 'inv no');
+
+  let colDate = findColExact(headers, 'date', 'invoice date', 'bill date');
+  if (colDate < 0) colDate = findColUnderscore(headers, 'date');
+  if (colDate < 0) colDate = findCol(headers, 'date', 'invoice date', 'bill date');
 
   for (let i = 0; i < rows.length; i++) {
     const vals = rows[i];
@@ -762,7 +837,8 @@ function parseRows(headers: string[], rows: string[][]): FullExtraction {
 
     const rate = colRate >= 0 ? num(vals[colRate]) : 0;
     const total = colTotal >= 0 ? num(vals[colTotal]) : 0;
-    const gstRate = colGst >= 0 ? num(vals[colGst]) : 0;
+    const gstRate = colGstRate >= 0 ? num(vals[colGstRate]) : 0;
+    const gstAmt = colGstAmt >= 0 ? num(vals[colGstAmt]) : 0;
     const taxable = colTaxable >= 0 ? num(vals[colTaxable]) : (qty && rate ? qty * rate : 0);
     const cgst = colCgst >= 0 ? num(vals[colCgst]) : 0;
     const sgst = colSgst >= 0 ? num(vals[colSgst]) : 0;
@@ -771,19 +847,19 @@ function parseRows(headers: string[], rows: string[][]): FullExtraction {
     extraction.items.push({
       sno: i + 1,
       erpId: colErp >= 0 ? (vals[colErp] || '').trim() : '',
-      description: clean(itemName), // Clean description to remove any floating symbols
+      description: clean(itemName),
       hsn: colHsn >= 0 ? (vals[colHsn] || '').trim() : '',
       quantity: qty,
       freeQty: 0,
       unit: 'PCS',
-      mrp: mrp || rate, // Default MRP to rate if missing
+      mrp: mrp || rate,
       rate,
       discount: colDisc >= 0 ? num(vals[colDisc]) : 0,
       taxable,
       gstRate,
       cgst, sgst,
-      gst: cgst + sgst || (taxable * gstRate / 100),
-      total: total || (taxable + cgst + sgst),
+      gst: gstAmt || cgst + sgst || (taxable * gstRate / 100),
+      total: total || (taxable + gstAmt),
     });
   }
 
