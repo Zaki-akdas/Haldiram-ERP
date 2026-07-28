@@ -38,10 +38,12 @@ export default function BillsPage() {
   const [importing, setImporting] = useState(false);
   const [tab, setTab] = useState<'upload' | 'paste'>('upload');
   const [invoiceId, setInvoiceId] = useState<number | null>(null);
+  const [mode, setMode] = useState<'regex' | 'ai'>('regex');
+  const [downloading, setDownloading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const reset = () => {
-    setFile(null); setTextInput(''); setExtracted(null); setError(''); setInvoiceId(null);
+    setFile(null); setTextInput(''); setExtracted(null); setError(''); setInvoiceId(null); setMode('regex'); setDownloading(false);
     if (fileRef.current) fileRef.current.value = '';
   };
 
@@ -74,7 +76,8 @@ export default function BillsPage() {
       }
 
       const token = typeof window !== 'undefined' ? localStorage.getItem('salessettle_token') : null;
-      const res = await fetch('/api/invoices/extract', {
+      const endpoint = mode === 'ai' ? '/api/ai/extract' : '/api/invoices/extract';
+      const res = await fetch(endpoint, {
         method: 'POST', body: fd,
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
@@ -188,6 +191,49 @@ export default function BillsPage() {
     }
   };
 
+  const handleDownload = async (targetFormat: 'csv' | 'copy-paste') => {
+    if (!file) return;
+    setDownloading(true);
+    setError('');
+
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('targetFormat', targetFormat);
+
+      const token = typeof window !== 'undefined' ? localStorage.getItem('salessettle_token') : null;
+      const res = await fetch('/api/convert', {
+        method: 'POST',
+        body: fd,
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Conversion failed' }));
+        throw new Error(err.error || 'Conversion failed');
+      }
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const disposition = res.headers.get('Content-Disposition');
+      let filename = targetFormat === 'csv' ? 'converted.csv' : 'converted.txt';
+      if (disposition && disposition.includes('filename=')) {
+        filename = disposition.split('filename=')[1].replace(/"/g, '');
+      }
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Conversion failed');
+    } finally {
+      setDownloading(false);
+    }
+  };
+
   return (
     <div className="space-y-6 max-w-5xl mx-auto">
       <div>
@@ -206,6 +252,22 @@ export default function BillsPage() {
               {t === 'upload' ? '📁 Upload Bill' : '📝 Paste Text'}
             </button>
           ))}
+        </div>
+
+        {/* Mode toggle */}
+        <div className="flex border-b border-slate-200 dark:border-slate-700">
+          <button onClick={() => setMode('regex')}
+            className={`flex-1 px-4 py-2 text-xs font-bold transition-colors ${mode === 'regex'
+              ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50/30 dark:bg-blue-900/10'
+              : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}>
+            ⚡ Fast (Regex)
+          </button>
+          <button onClick={() => setMode('ai')}
+            className={`flex-1 px-4 py-2 text-xs font-bold transition-colors ${mode === 'ai'
+              ? 'text-purple-600 border-b-2 border-purple-600 bg-purple-50/30 dark:bg-purple-900/10'
+              : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}>
+            🤖 AI (Ollama)
+          </button>
         </div>
 
         <div className="p-5">
@@ -256,7 +318,7 @@ export default function BillsPage() {
             <button onClick={handleExtract} 
               disabled={tab === 'upload' ? !file : !textInput.trim()}
               className="mt-6 w-full py-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold shadow-lg shadow-emerald-200 dark:shadow-none transition-all active:scale-95 flex items-center justify-center gap-3 disabled:opacity-40">
-              <span>🤖</span> Extract Bill Details
+              <span>{mode === 'ai' ? '🤖' : '⚡'}</span> {mode === 'ai' ? 'AI Extract Bill' : 'Extract Bill Details'}
             </button>
           )}
         </div>
@@ -350,21 +412,35 @@ export default function BillsPage() {
               )}
 
               {/* Action */}
-              <div className="flex gap-4">
-                <button 
-                  onClick={handleImport} 
-                  disabled={importing}
-                  className="flex-1 py-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold shadow-xl shadow-emerald-100 dark:shadow-none transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
-                >
-                  {importing ? (
-                    <><span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" /> Punching...</>
-                  ) : (
-                    <>📥 Punch Bill to Dashboard</>
-                  )}
-                </button>
-                <button onClick={reset} className="px-6 py-4 border border-slate-300 dark:border-slate-600 text-slate-500 rounded-xl font-bold hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
-                  🔄 New
-                </button>
+              <div className="flex flex-col gap-3">
+                <div className="flex gap-3">
+                  <button 
+                    onClick={handleImport} 
+                    disabled={importing}
+                    className="flex-1 py-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold shadow-xl shadow-emerald-100 dark:shadow-none transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {importing ? (
+                      <><span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" /> Punching...</>
+                    ) : (
+                      <>📥 Punch Bill to Dashboard</>
+                    )}
+                  </button>
+                  <button onClick={reset} className="px-6 py-4 border border-slate-300 dark:border-slate-600 text-slate-500 rounded-xl font-bold hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
+                    🔄 New
+                  </button>
+                </div>
+                {file && (
+                  <div className="flex gap-3">
+                    <button onClick={() => handleDownload('csv')} disabled={downloading}
+                      className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl font-bold text-sm transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
+                      <span>📋</span> Download CSV
+                    </button>
+                    <button onClick={() => handleDownload('copy-paste')} disabled={downloading}
+                      className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl font-bold text-sm transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
+                      <span>📝</span> Download Copy-Paste
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </div>

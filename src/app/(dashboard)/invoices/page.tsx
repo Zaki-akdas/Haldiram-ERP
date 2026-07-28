@@ -57,11 +57,13 @@ export default function InvoicesPage() {
   const [tab, setTab] = useState<'upload' | 'paste'>('upload');
   const [importing, setImporting] = useState(false);
   const [invoiceId, setInvoiceId] = useState<number | null>(null);
+  const [mode, setMode] = useState<'regex' | 'ai'>('regex');
+  const [downloading, setDownloading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const reset = () => {
-    setFile(null); setExtracted(null); setValidation(null); setRecommendation(null); setError(''); setInvoiceId(null);
+    setFile(null); setExtracted(null); setValidation(null); setRecommendation(null); setError(''); setInvoiceId(null); setMode('regex'); setDownloading(false);
     if (fileRef.current) fileRef.current.value = '';
   };
 
@@ -99,7 +101,8 @@ export default function InvoicesPage() {
       else fd.append('textContent', textInput);
 
       const token = typeof window !== 'undefined' ? localStorage.getItem('salessettle_token') : null;
-      const res = await fetch('/api/invoices/extract', {
+      const endpoint = mode === 'ai' ? '/api/ai/extract' : '/api/invoices/extract';
+      const res = await fetch(endpoint, {
         method: 'POST', body: fd,
         signal: abortRef.current.signal,
         headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -120,6 +123,49 @@ export default function InvoicesPage() {
       if (err instanceof Error && err.name === 'AbortError') setError('Extraction cancelled');
       else setError(err instanceof Error ? err.message : 'Extraction failed');
     } finally { clearInterval(tick); setExtracting(false); }
+  };
+
+  const handleDownload = async (targetFormat: 'csv' | 'copy-paste') => {
+    if (!file) return;
+    setDownloading(true);
+    setError('');
+
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('targetFormat', targetFormat);
+
+      const token = typeof window !== 'undefined' ? localStorage.getItem('salessettle_token') : null;
+      const res = await fetch('/api/convert', {
+        method: 'POST',
+        body: fd,
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Conversion failed' }));
+        throw new Error(err.error || 'Conversion failed');
+      }
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const disposition = res.headers.get('Content-Disposition');
+      let filename = targetFormat === 'csv' ? 'converted.csv' : 'converted.txt';
+      if (disposition && disposition.includes('filename=')) {
+        filename = disposition.split('filename=')[1].replace(/"/g, '');
+      }
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Conversion failed');
+    } finally {
+      setDownloading(false);
+    }
   };
 
   const handleImport = async () => {
@@ -249,6 +295,22 @@ export default function InvoicesPage() {
           ))}
         </div>
 
+        {/* Mode toggle */}
+        <div className="flex border-b border-slate-200 dark:border-slate-700">
+          <button onClick={() => setMode('regex')}
+            className={`flex-1 px-4 py-2 text-xs font-bold transition-colors ${mode === 'regex'
+              ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50/30 dark:bg-blue-900/10'
+              : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}>
+            ⚡ Fast (Regex)
+          </button>
+          <button onClick={() => setMode('ai')}
+            className={`flex-1 px-4 py-2 text-xs font-bold transition-colors ${mode === 'ai'
+              ? 'text-purple-600 border-b-2 border-purple-600 bg-purple-50/30 dark:bg-purple-900/10'
+              : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}>
+            🤖 AI (Ollama)
+          </button>
+        </div>
+
         <div className="p-5">
           {tab === 'upload' ? (
             <>
@@ -296,7 +358,7 @@ export default function InvoicesPage() {
               {extracting ? (
                 <><span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" /> Extracting...</>
               ) : (
-                <>🤖 Extract Data</>
+                <>{mode === 'ai' ? '🤖 AI Extract' : '⚡ Extract Data'}</>
               )}
             </button>
             {extracting && (
@@ -304,6 +366,19 @@ export default function InvoicesPage() {
                 className="px-6 py-3.5 bg-red-600 hover:bg-red-700 text-white rounded-xl font-medium">✕ Cancel</button>
             )}
           </div>
+
+          {file && hasResults && !extracting && (
+            <div className="mt-3 flex gap-3">
+              <button onClick={() => handleDownload('csv')} disabled={downloading}
+                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl font-bold text-sm transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
+                <span>📋</span> Download CSV
+              </button>
+              <button onClick={() => handleDownload('copy-paste')} disabled={downloading}
+                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl font-bold text-sm transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
+                <span>📝</span> Download Copy-Paste
+              </button>
+            </div>
+          )}
 
           {/* Progress */}
           {(extracting || progress === 100) && (
