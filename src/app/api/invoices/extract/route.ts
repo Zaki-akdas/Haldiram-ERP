@@ -868,7 +868,8 @@ function parseRows(headers: string[], rows: string[][]): FullExtraction {
   extraction.totals.taxableAmount = extraction.items.reduce((s, it) => s + it.taxable, 0);
   extraction.totals.cgst = extraction.items.reduce((s, it) => s + it.cgst, 0);
   extraction.totals.sgst = extraction.items.reduce((s, it) => s + it.sgst, 0);
-  extraction.totals.totalGst = extraction.totals.cgst + extraction.totals.sgst;
+  const totalGstFromRows = extraction.items.reduce((s, it) => s + (it.gst || 0), 0);
+  extraction.totals.totalGst = Math.max(extraction.totals.totalGst, totalGstFromRows);
 
   return extraction;
 }
@@ -1141,6 +1142,12 @@ function parseExcel(buffer: Buffer): FullExtraction {
       const tabularExt = parseRows(headers, rows);
       if (tabularExt.items.length > 0) {
         extraction.items = tabularExt.items;
+        extraction.totals.grandTotal = tabularExt.totals.grandTotal;
+        extraction.totals.totalQty = tabularExt.totals.totalQty;
+        extraction.totals.taxableAmount = tabularExt.totals.taxableAmount;
+        extraction.totals.totalGst = tabularExt.totals.totalGst;
+        extraction.totals.cgst = tabularExt.totals.cgst;
+        extraction.totals.sgst = tabularExt.totals.sgst;
       }
     }
 
@@ -1149,7 +1156,11 @@ function parseExcel(buffer: Buffer): FullExtraction {
     if (!extraction.seller.gstin) extraction.seller.gstin = regexExt.seller.gstin;
     if (!extraction.seller.name) extraction.seller.name = regexExt.seller.name;
     if (!extraction.invoice.number) extraction.invoice.number = regexExt.invoice.number;
-    if (!extraction.totals.grandTotal) extraction.totals.grandTotal = regexExt.totals.grandTotal;
+    if (!extraction.totals.grandTotal && regexExt.totals.grandTotal > 0) extraction.totals.grandTotal = regexExt.totals.grandTotal;
+    if (!extraction.totals.totalQty && regexExt.totals.totalQty > 0) extraction.totals.totalQty = regexExt.totals.totalQty;
+    if (!extraction.totals.taxableAmount && regexExt.totals.taxableAmount > 0) extraction.totals.taxableAmount = regexExt.totals.taxableAmount;
+    if (!extraction.totals.totalGst && regexExt.totals.totalGst > 0) extraction.totals.totalGst = regexExt.totals.totalGst;
+    if (!extraction.totals.subtotal && regexExt.totals.subtotal > 0) extraction.totals.subtotal = regexExt.totals.subtotal;
 
     extraction.metadata.fileType = 'excel';
     extraction.metadata.extractionConfidence = 98;
