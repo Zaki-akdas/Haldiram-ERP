@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
     if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
 
     const body = await request.json();
-    let { invoiceNumber, customerId, customerName, orderDate, items, beat, notes, creditDays } = body;
+    let { invoiceNumber, customerId, customerName, customerPhone, customerEmail, customerGstin, customerAddress, orderDate, items, beat, notes, creditDays } = body;
 
     const orderDateObj = orderDate ? new Date(orderDate) : new Date();
     let dueDate = null;
@@ -106,13 +106,31 @@ export async function POST(request: NextRequest) {
     const grandTotal = subtotal + totalGst;
 
     if (!customerId && customerName) {
-      const { data: existing } = await supabase.from('customers').select('id').ilike('name', customerName).limit(1);
-      if (existing && existing.length > 0) {
-        customerId = existing[0].id;
-      } else {
+      let customerQuery = supabase.from('customers').select('id').ilike('name', customerName).limit(1);
+      if (customerPhone) {
+        const { data: byPhone } = await supabase.from('customers').select('id').eq('phone', customerPhone).limit(1);
+        if (byPhone && byPhone.length > 0) {
+          customerId = byPhone[0].id;
+        }
+      }
+      if (!customerId) {
+        const { data: existing } = await customerQuery;
+        if (existing && existing.length > 0) {
+          customerId = existing[0].id;
+        }
+      }
+      if (!customerId) {
         const { data: newCust } = await supabase
           .from('customers')
-          .insert({ name: customerName, beat: beat || 'New Beat', assigned_salesperson_id: user.id })
+          .insert({
+            name: customerName,
+            phone: customerPhone || null,
+            email: customerEmail || null,
+            gstin: customerGstin || null,
+            address: customerAddress || null,
+            beat: beat || 'New Beat',
+            assigned_salesperson_id: user.id,
+          })
           .select()
           .single();
         customerId = newCust.id;

@@ -5,7 +5,7 @@ import { useAuth } from '@/components/AuthProvider';
 
 /* ─── Types ─── */
 interface Seller { name: string; gstin: string; pan: string; fssai: string; phone: string; address: string }
-interface Buyer { name: string; phone: string; address: string }
+interface Buyer { name: string; phone: string; address: string; gstin?: string }
 interface InvMeta { number: string; date: string; salesman: string; beat: string; employeeContact: string }
 interface Item {
   sno: number; erpId: string; description: string; hsn: string;
@@ -103,8 +103,8 @@ export default function BillsPage() {
     try {
       // 1. Resolve Customer ID
       const buyerName = extracted.buyer?.name || '';
-      let customerId = 1; // Default fallback
-      
+      let customerId: number | null = null;
+
       try {
         const custRes = await authFetch(`/api/customers?search=${encodeURIComponent(buyerName)}&limit=1`);
         if (custRes.ok) {
@@ -114,7 +114,7 @@ export default function BillsPage() {
           }
         }
       } catch (e) {
-        console.warn('Customer resolution failed, using fallback ID 1', e);
+        console.warn('Customer resolution failed, will attempt auto-create', e);
       }
 
       // 2. Resolve Invoice Number (must be unique)
@@ -151,8 +151,12 @@ export default function BillsPage() {
       // 4. Create the order
       const payload = {
         invoiceNumber: invNo,
-        customerId: customerId,
-        customerName: buyerName, // Pass the name to allow auto-creation if ID 1 fallback is used
+        customerId,
+        customerName: buyerName,
+        customerPhone: extracted.buyer?.phone || '',
+        customerEmail: '',
+        customerGstin: extracted.buyer?.gstin || '',
+        customerAddress: extracted.buyer?.address || '',
         orderDate: new Date().toISOString(),
         beat: (extracted.invoice?.beat || 'Field Entry').substring(0, 250),
         notes: `Imported via Salesperson. Ref: ${file?.name || 'Text'}. Orig Date: ${extracted.invoice?.date || 'N/A'}`,
