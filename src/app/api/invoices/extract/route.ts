@@ -229,6 +229,7 @@ function extractAll(text: string): FullExtraction {
   const invPatterns = [
     /(?:Invoice|Bill|Inv)[\s.#:No]*[:\s]*([A-Z]{2,6}\/\d{2,4}-\d{2,4}\/\d+)/i,
     /\b([A-Z]{2,6}\/\d{2,4}-\d{2,4}\/\d+)\b/,
+    /Invoice\s*(?:No\.?|Number)[:\s]*([A-Z0-9][\w\-\/]*)/i,
     /(?:Invoice|Bill)[\s.#:No]*[:\s]*([A-Z0-9][\w\-\/]+)/i,
   ];
   for (const p of invPatterns) {
@@ -284,26 +285,23 @@ function extractAll(text: string): FullExtraction {
     const m = full.match(p);
     if (m && m[1].trim().length > 2) {
       let bname = clean(m[1]).replace(/\n.*/, '');
-      // Strip trailing address/phone/keyword fragments
-      bname = bname.replace(/\s*(?:Phone|Mobile|Contact|Address|City|State|Pin|Colony|Nagar|Road).*$/i, '').trim();
+      bname = bname.replace(/\s*(?:Phone|Mobile|Contact|Address|City|State|Pin|Colony|Nagar|Road|Name)[\s:]*.*$/i, '').trim();
       if (bname.length > 2) { buyer.name = bname; break; }
     }
   }
 
-  // Also try finding buyer near "Bill To" label in lines
+  // Also try finding buyer near "Bill To" / "Customer Name" label in lines
   if (!buyer.name) {
     for (let i = 0; i < lines.length; i++) {
       if (/bill\s*to|ship\s*to|sold\s*to|customer\s*name/i.test(lines[i])) {
-        // Check if buyer name is on the same line after the label
         const sameLine = lines[i].replace(/.*(?:bill\s*to|ship\s*to|sold\s*to|customer\s*name)\s*:?\s*/i, '').trim();
-        if (sameLine && sameLine.length > 2 && !/phone|mobile|gstin/i.test(sameLine)) {
+        if (sameLine && sameLine.length > 2 && !/phone|mobile|gstin|contact/i.test(sameLine)) {
           buyer.name = clean(sameLine);
           break;
         }
-        // Otherwise next non-empty line
         for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
           const ln = lines[j].trim();
-          if (ln && !/phone|mobile|gstin|gst|address|city|state|pin|invoice|date/i.test(ln) && ln.length > 2) {
+          if (ln && !/phone|mobile|gstin|gst|address|city|state|pin|invoice|date|contact/i.test(ln) && ln.length > 2) {
             buyer.name = clean(ln);
             break;
           }
@@ -447,6 +445,15 @@ function extractAll(text: string): FullExtraction {
           });
         }
       }
+    }
+  }
+
+  // ── 12b. Pipe-delimited text table parser (for formatted invoices like "ITEM DETAILS") ──
+  if (items.length === 0) {
+    const pipeTableExtraction = parsePipeTable(full, lines);
+    if (pipeTableExtraction.items.length > 0) {
+      items.push(...pipeTableExtraction.items);
+      Object.assign(totals, pipeTableExtraction.totals);
     }
   }
 
@@ -877,6 +884,141 @@ function parseRows(headers: string[], rows: string[][]): FullExtraction {
 interface MarkdownColumn {
   header: string;
   index: number;
+}
+
+function parsePipeTable(fullText: string, lines: string[]): { items: any[]; totals: any } {
+  const result = { items: [] as any[], totals: { grandTotal: 0, totalQty: 0, taxableAmount: 0, totalGst: 0, subtotal: 0, discount: 0, roundOff: 0 } as any };
+
+  let tableStart = -1;
+  let tableEnd = -1;
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    if (trimmed.includes('|') && /#\s*\|/.test(trimmed)) {
+      tableStart = i;
+      break;
+    }
+  }
+
+  if (tableStart < 0) return result;
+
+  for (let i = tableStart + 1; i < lines.length; i++) {
+    if (lines[i].trim().includes('|')) {
+      tableEnd = i;
+    } else if (lines[i].trim().length > 0 && !lines[i].trim().startsWith('|')) {
+      break;
+    }
+  }
+
+  if (tableEnd < 0) return result;
+
+  const headerLine = lines[tableStart];
+  const headerParts = headerLine.split('|').map(h => h.trim());
+  const headers = headerParts.filter((h, i, arr) => {
+    if (i === 0 && !h) return false;
+    if (i === arr.length - 1 && !h) return false;
+    return h.length > 0 || arr.length <= 3;
+  });
+
+  const colMap: Record<string, number> = {};
+  const headerLower = headers.map(h => h.toLowerCase());
+  const mappings: [string[], string][] = [
+    [['item name', 'item_name', 'description'], 'name'],
+    [['item_erp_id', 'erp id', 'erp'], 'erp'],
+    [['hsn/sac', 'hsn_code', 'hsn', 'sac'], 'hsn'],
+    [['qty', 'quantity'], 'qty'],
+    [['gst rate/amt', 'gst_amt', 'gst amount', 'gst amt', 'total gst amount'], 'gstAmt'],
+    [['price/unit', 'ptr', 'rate', 'price'], 'rate'],
+    [['unit', 'standard_unit', 'std_unit'], 'unit'],
+    [['taxable', 'taxable value', 'taxable amt'], 'taxable'],
+    [['gst rate', 'gst%', 'gst_pct', 'gst rate/amt'], 'gstRate'],
+    [['amount', 'total', 'amount (₹)'], 'total'],
+  ];
+
+  for (let i = 0; i < headerLower.length; i++) {
+    for (const [keys, field] of mappings) {
+      if (keys.some(k => headerLower[i].includes(k))) {
+        colMap[field] = i;
+        break;
+      }
+    }
+  }
+
+  function stripPipe(value: string): string {
+    return value.replace(/\*/g, '').replace(/₹/g, '').replace(/,/g, '').trim();
+  }
+
+  function parseGstCell(value: string): { amount: number; rate: number } {
+    const match = value.match(/([\d.]+)\s*\(?\s*([\d.]+)%?\)?/);
+    if (match) {
+      return { amount: parseFloat(match[1]), rate: parseFloat(match[2]) };
+    }
+    const numVal = parseFloat(value.replace(/[^\d.]/g, ''));
+    return { amount: isNaN(numVal) ? 0 : numVal, rate: 0 };
+  }
+
+  for (let i = tableStart + 1; i <= tableEnd; i++) {
+    const row = lines[i].split('|').map(c => c.trim());
+    const cleanRow = row.filter((_, i, arr) => {
+      if (i === 0 && !row[0]) return false;
+      if (i === arr.length - 1 && !row[arr.length - 1]) return false;
+      return true;
+    });
+
+    if (cleanRow.length === 0) continue;
+
+    const serialNum = parseInt(row[0] || '');
+    if (isNaN(serialNum)) continue;
+
+    const itemName = colMap['name'] >= 0 ? stripPipe(cleanRow[colMap['name']] || '') : '';
+    const qty = colMap['qty'] >= 0 ? num(stripPipe(cleanRow[colMap['qty']] || '')) : 0;
+    const hsn = colMap['hsn'] >= 0 ? stripPipe(cleanRow[colMap['hsn']] || '') : '';
+    const rate = colMap['rate'] >= 0 ? num(stripPipe(cleanRow[colMap['rate']] || '')) : 0;
+    const taxable = colMap['taxable'] >= 0 ? num(stripPipe(cleanRow[colMap['taxable']] || '')) : 0;
+    const total = colMap['total'] >= 0 ? num(stripPipe(cleanRow[colMap['total']] || '')) : 0;
+
+    let gstAmt = 0;
+    let gstRate = 0;
+    if (colMap['gstAmt'] >= 0) {
+      const gstCell = stripPipe(cleanRow[colMap['gstAmt']] || '');
+      const parsed = parseGstCell(gstCell);
+      gstAmt = parsed.amount;
+      gstRate = parsed.rate;
+    }
+    if (colMap['gstRate'] >= 0 && gstRate === 0) {
+      gstRate = num(stripPipe(cleanRow[colMap['gstRate']] || ''));
+    }
+
+    if (!itemName && qty === 0 && total === 0) continue;
+
+    result.items.push({
+      sno: result.items.length + 1,
+      erpId: '',
+      description: clean(itemName),
+      hsn,
+      quantity: qty,
+      freeQty: 0,
+      unit: colMap['unit'] >= 0 ? clean(cleanRow[colMap['unit']] || '') : 'PCS',
+      mrp: rate,
+      rate,
+      discount: 0,
+      taxable,
+      gstRate,
+      cgst: 0,
+      sgst: 0,
+      gst: gstAmt,
+      total: total || (taxable + gstAmt),
+    });
+  }
+
+  if (result.items.length > 0) {
+    result.totals.grandTotal = result.items.reduce((s, it) => s + it.total, 0);
+    result.totals.totalQty = result.items.reduce((s, it) => s + it.quantity, 0);
+    result.totals.taxableAmount = result.items.reduce((s, it) => s + it.taxable, 0);
+    result.totals.totalGst = result.items.reduce((s, it) => s + it.gst, 0);
+  }
+
+  return result;
 }
 
 function parseMarkdownTable(text: string): FullExtraction {
