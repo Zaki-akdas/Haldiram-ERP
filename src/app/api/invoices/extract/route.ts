@@ -285,7 +285,8 @@ function extractAll(text: string): FullExtraction {
     const m = full.match(p);
     if (m && m[1].trim().length > 2) {
       let bname = clean(m[1]).replace(/\n.*/, '');
-      bname = bname.replace(/\s*(?:Phone|Mobile|Contact|Address|City|State|Pin|Colony|Nagar|Road|Name)[\s:]*.*$/i, '').trim();
+      bname = bname.replace(/^(?:\w+\s+)*(?:Name|Customer|Buyer|Party)\s*:?\s*/i, '').trim();
+      bname = bname.replace(/\s*(?:Phone|Mobile|Contact|Address|City|State|Pin|Colony|Nagar|Road)[\s:]*.*$/i, '').trim();
       if (bname.length > 2) { buyer.name = bname; break; }
     }
   }
@@ -300,7 +301,8 @@ function extractAll(text: string): FullExtraction {
           break;
         }
         for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
-          const ln = lines[j].trim();
+          let ln = lines[j].trim();
+          ln = ln.replace(/^(?:\w+\s+)*(?:Name|Customer|Buyer|Party)\s*:?\s*/i, '').trim();
           if (ln && !/phone|mobile|gstin|gst|address|city|state|pin|invoice|date|contact/i.test(ln) && ln.length > 2) {
             buyer.name = clean(ln);
             break;
@@ -991,6 +993,8 @@ function parsePipeTable(fullText: string, lines: string[]): { items: any[]; tota
 
     if (!itemName && qty === 0 && total === 0) continue;
 
+    const derivedTaxable = taxable > 0 ? taxable : (total > 0 ? total - gstAmt : (qty > 0 && rate > 0 ? qty * rate : 0));
+
     result.items.push({
       sno: result.items.length + 1,
       erpId: '',
@@ -1002,12 +1006,12 @@ function parsePipeTable(fullText: string, lines: string[]): { items: any[]; tota
       mrp: rate,
       rate,
       discount: 0,
-      taxable,
+      taxable: derivedTaxable,
       gstRate,
       cgst: 0,
       sgst: 0,
       gst: gstAmt,
-      total: total || (taxable + gstAmt),
+      total: total || (derivedTaxable + gstAmt),
     });
   }
 
