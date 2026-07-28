@@ -873,6 +873,181 @@ function parseRows(headers: string[], rows: string[][]): FullExtraction {
   return extraction;
 }
 
+interface MarkdownColumn {
+  header: string;
+  index: number;
+}
+
+function parseMarkdownTable(text: string): FullExtraction {
+  const extraction = extractAll('');
+  const lines = text.split('\n');
+
+  let tableStart = -1;
+  let tableEnd = -1;
+  let separatorLine = -1;
+  let maxCols = 0;
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    if (trimmed.includes('|') && trimmed.includes('---')) {
+      const headerLine = lines[i - 1];
+      const cols = headerLine.split('|').length;
+      if (cols > maxCols) {
+        maxCols = cols;
+        tableStart = i - 1;
+        separatorLine = i;
+      }
+    }
+  }
+
+  if (tableStart >= 0) {
+    for (let i = separatorLine + 1; i < lines.length; i++) {
+      if (lines[i].trim().includes('|')) {
+        tableEnd = i;
+      } else if (lines[i].trim().length > 0 && !lines[i].trim().startsWith('|')) {
+        break;
+      }
+    }
+  }
+
+  if (tableStart < 0 || tableEnd < 0) {
+    return extractAll(text);
+  }
+
+  const headerLine = lines[tableStart];
+  const headers = headerLine.split('|').map(h => h.trim()).filter((h, i, arr) => {
+    if (i === 0 || i === arr.length - 1) return false;
+    return h.length > 0 || arr.length <= 3;
+  });
+
+  const colMap: Record<string, number> = {};
+  const headerLower = headers.map(h => h.toLowerCase());
+  const mappings: [string[], string][] = [
+    [['item name', 'item_name', 'description'], 'name'],
+    [['item_erp_id', 'erp id', 'erp'], 'erp'],
+    [['hsn code', 'hsn_code', 'hsn'], 'hsn'],
+    [['mrp', 'mrp_inr'], 'mrp'],
+    [['cases', 'standard_unit', 'std_unit'], 'cases'],
+    [['qty', 'quantity', 'invoice_delivery_qty', 'delivery_qty'], 'qty'],
+    [['ptr', 'price_std_inr', 'rate'], 'rate'],
+    [['taxable value', 'taxable_value', 'taxable'], 'taxable'],
+    [['gst amt', 'gst_amt', 'gst amount'], 'gstAmt'],
+    [['total value', 'total', 'grand_total'], 'total'],
+  ];
+
+  for (let i = 0; i < headerLower.length; i++) {
+    for (const [keys, field] of mappings) {
+      if (keys.some(k => headerLower[i].includes(k))) {
+        colMap[field] = i;
+        break;
+      }
+    }
+  }
+
+  function stripMarkdown(value: string): string {
+    return value.replace(/\*\*/g, '').replace(/₹/g, '').replace(/,/g, '').trim();
+  }
+
+  const itemRows: string[][] = [];
+  for (let i = separatorLine + 1; i <= tableEnd; i++) {
+    const row = lines[i].split('|').map(c => c.trim());
+    const cleanRow = row.filter((_, i, arr) => {
+      if (i === 0 || i === arr.length - 1) return false;
+      return true;
+    });
+
+    if (cleanRow.length === 0) continue;
+
+    const firstCell = stripMarkdown(cleanRow[0] || '');
+    const totalRowLabels = ['total', 'TOTAL'];
+    const isTotalRow = totalRowLabels.some(label => firstCell === label);
+
+    if (isTotalRow && cleanRow.length >= 2) {
+      if (colMap['total'] >= 0 && cleanRow[colMap['total']]) {
+        extraction.totals.grandTotal = num(stripMarkdown(cleanRow[colMap['total']]));
+      }
+      if (colMap['taxable'] >= 0 && cleanRow[colMap['taxable']]) {
+        extraction.totals.taxableAmount = num(stripMarkdown(cleanRow[colMap['taxable']]));
+      }
+      if (colMap['gstAmt'] >= 0 && cleanRow[colMap['gstAmt']]) {
+        extraction.totals.totalGst = num(stripMarkdown(cleanRow[colMap['gstAmt']]));
+      }
+      if (colMap['qty'] >= 0 && cleanRow[colMap['qty']]) {
+        extraction.totals.totalQty = num(stripMarkdown(cleanRow[colMap['qty']]));
+      }
+      if (colMap['cases'] >= 0 && cleanRow[colMap['cases']]) {
+        extraction.totals.totalQty = num(stripMarkdown(cleanRow[colMap['cases']]));
+      }
+      continue;
+    }
+
+    const serialNum = parseInt(stripMarkdown(cleanRow[0] || ''));
+    if (!isNaN(serialNum) || (cleanRow[0] || '').length === 0) {
+      itemRows.push(cleanRow);
+    }
+  }
+
+  for (const row of itemRows) {
+    const rawItemName = colMap['name'] >= 0 ? row[colMap['name']] || '' : '';
+    const itemName = stripMarkdown(rawItemName);
+    const qty = colMap['qty'] >= 0 ? num(stripMarkdown(row[colMap['qty']] || '')) : 0;
+    if (!itemName && qty === 0) continue;
+
+    const erpId = colMap['erp'] >= 0 ? stripMarkdown(row[colMap['erp']] || '') : '';
+    const hsn = colMap['hsn'] >= 0 ? stripMarkdown(row[colMap['hsn']] || '') : '';
+    const mrp = colMap['mrp'] >= 0 ? num(stripMarkdown(row[colMap['mrp']] || '')) : 0;
+    const cases = colMap['cases'] >= 0 ? num(stripMarkdown(row[colMap['cases']] || '')) : 0;
+    const rate = colMap['rate'] >= 0 ? num(stripMarkdown(row[colMap['rate']] || '')) : 0;
+    const taxable = colMap['taxable'] >= 0 ? num(stripMarkdown(row[colMap['taxable']] || '')) : 0;
+    const gstAmt = colMap['gstAmt'] >= 0 ? num(stripMarkdown(row[colMap['gstAmt']] || '')) : 0;
+    const total = colMap['total'] >= 0 ? num(stripMarkdown(row[colMap['total']] || '')) : 0;
+    const gstRate = taxable > 0 && gstAmt > 0 ? Math.round((gstAmt / taxable) * 1000) / 10 : 5;
+
+    extraction.items.push({
+      sno: extraction.items.length + 1,
+      erpId,
+      description: clean(itemName),
+      hsn,
+      quantity: qty || cases,
+      freeQty: 0,
+      unit: 'PCS',
+      mrp: mrp || rate,
+      rate,
+      discount: 0,
+      taxable,
+      gstRate,
+      cgst: 0,
+      sgst: 0,
+      gst: gstAmt,
+      total: total || (taxable + gstAmt),
+    });
+  }
+
+  if (extraction.items.length > 0) {
+    extraction.totals.grandTotal = extraction.items.reduce((s, it) => s + it.total, 0);
+    extraction.totals.totalQty = extraction.items.reduce((s, it) => s + it.quantity, 0);
+    extraction.totals.taxableAmount = extraction.items.reduce((s, it) => s + it.taxable, 0);
+    extraction.totals.totalGst = extraction.items.reduce((s, it) => s + it.gst, 0);
+  }
+
+  extraction.metadata.fileType = 'markdown-table';
+  extraction.metadata.extractionConfidence = extraction.items.length > 0 ? 95 : 40;
+  extraction.metadata.rawTextLength = text.length;
+  return extraction;
+}
+
+function isLikelyMarkdownTable(text: string): boolean {
+  const lines = text.split('\n');
+  let tableLines = 0;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.includes('|') && trimmed.includes('---')) {
+      tableLines++;
+    }
+  }
+  return tableLines >= 1;
+}
+
 function parseCSV(text: string): FullExtraction {
   const lines = text.split('\n').filter(l => l.trim());
   if (lines.length < 2) return extractAll('');
@@ -1011,7 +1186,12 @@ export async function POST(request: NextRequest) {
 
     if (textContent) {
       // ── Direct text input ──
-      extraction = extractAll(textContent);
+      if (isLikelyMarkdownTable(textContent)) {
+        extraction = parseMarkdownTable(textContent);
+        fileType = 'markdown';
+      } else {
+        extraction = extractAll(textContent);
+      }
       fileSize = textContent.length;
     } else if (file) {
       fileName = file.name;
