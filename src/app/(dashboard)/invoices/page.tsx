@@ -56,11 +56,12 @@ export default function InvoicesPage() {
   const [error, setError] = useState('');
   const [tab, setTab] = useState<'upload' | 'paste'>('upload');
   const [importing, setImporting] = useState(false);
+  const [invoiceId, setInvoiceId] = useState<number | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const reset = () => {
-    setFile(null); setExtracted(null); setValidation(null); setRecommendation(null); setError('');
+    setFile(null); setExtracted(null); setValidation(null); setRecommendation(null); setError(''); setInvoiceId(null);
     if (fileRef.current) fileRef.current.value = '';
   };
 
@@ -113,6 +114,7 @@ export default function InvoicesPage() {
       setExtracted(data.extracted);
       setValidation(data.validation);
       setRecommendation(data.recommendation);
+      setInvoiceId(data.invoiceId || null);
       setProgress(100);
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') setError('Extraction cancelled');
@@ -174,6 +176,7 @@ export default function InvoicesPage() {
 
       const payload = {
         invoiceNumber: invNo,
+        invoiceId: invoiceId,
         customerId,
         customerName: buyerName,
         customerPhone: extracted.buyer?.phone || '',

@@ -37,10 +37,11 @@ export default function BillsPage() {
   const [error, setError] = useState('');
   const [importing, setImporting] = useState(false);
   const [tab, setTab] = useState<'upload' | 'paste'>('upload');
+  const [invoiceId, setInvoiceId] = useState<number | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const reset = () => {
-    setFile(null); setTextInput(''); setExtracted(null); setError('');
+    setFile(null); setTextInput(''); setExtracted(null); setError(''); setInvoiceId(null);
     if (fileRef.current) fileRef.current.value = '';
   };
 
@@ -85,6 +86,7 @@ export default function BillsPage() {
 
       const data = await res.json();
       setExtracted(data.extracted);
+      setInvoiceId(data.invoiceId || null);
       setProgress(100);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Extraction failed');
@@ -151,6 +153,7 @@ export default function BillsPage() {
       // 4. Create the order
       const payload = {
         invoiceNumber: invNo,
+        invoiceId: invoiceId,
         customerId,
         customerName: buyerName,
         customerPhone: extracted.buyer?.phone || '',

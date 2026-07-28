@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
     if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
 
     const body = await request.json();
-    let { invoiceNumber, customerId, customerName, customerPhone, customerEmail, customerGstin, customerAddress, orderDate, items, beat, notes, creditDays } = body;
+    let { invoiceNumber, invoiceId, customerId, customerName, customerPhone, customerEmail, customerGstin, customerAddress, orderDate, items, beat, notes, creditDays } = body;
 
     const orderDateObj = orderDate ? new Date(orderDate) : new Date();
     let dueDate = null;
@@ -191,6 +191,14 @@ export async function POST(request: NextRequest) {
       entity_id: newOrder.id,
       description: `Created order ${finalInvoiceNumber}`,
     });
+
+    if (invoiceId) {
+      try {
+        await supabase.from('invoices').update({ imported_order_id: newOrder.id, status: 'imported' }).eq('id', invoiceId);
+      } catch (e) {
+        console.warn('Invoice link failed:', e);
+      }
+    }
 
     return NextResponse.json({ order: newOrder }, { status: 201 });
   } catch (error) {

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
+import { getSupabaseAdmin } from '@/db';
 
 export const dynamic = 'force-dynamic';
 
@@ -918,6 +919,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
     }
 
+    const supabase = getSupabaseAdmin();
     const formData = await request.formData();
     const file = formData.get('file') as File | null;
     const textContent = formData.get('textContent') as string | null;
@@ -1013,12 +1015,35 @@ export async function POST(request: NextRequest) {
       tips: tips[fileType] || tips.text,
     };
 
+    let invoiceId: number | null = null;
+    try {
+      const { data: invoice, error: invoiceError } = await supabase
+        .from('invoices')
+        .insert({
+          file_name: fileName || 'text-input',
+          file_type: fileType,
+          file_size: fileSize || 0,
+          extracted_data: extraction as any,
+          validation_result: validation as any,
+          uploaded_by_id: user.id,
+          status: 'pending',
+        })
+        .select()
+        .single();
+      if (!invoiceError && invoice) {
+        invoiceId = invoice.id;
+      }
+    } catch (e) {
+      console.warn('Invoice save failed:', e);
+    }
+
     return NextResponse.json({
       extracted: extraction,
       validation,
       recommendation,
       fileName,
       fileSize,
+      invoiceId,
     });
   } catch (error) {
     console.error('Extraction error:', error);
