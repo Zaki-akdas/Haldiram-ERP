@@ -1,6 +1,9 @@
 import * as XLSX from 'xlsx';
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const pdfParse = require('pdf-parse');
+
+async function getPdfParse() {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  return require('pdf-parse');
+}
 
 // ────────────────────── Types ──────────────────────
 
@@ -158,6 +161,7 @@ function escapeCsv(val: string): string {
 
 export async function pdfToCsv(buffer: Buffer): Promise<string> {
   try {
+    const pdfParse = await getPdfParse();
     const data = await pdfParse(buffer);
     const text = data.text || '';
     const items = parseItemsFromText(text);
@@ -265,6 +269,7 @@ export async function excelToCopyPaste(buffer: Buffer): Promise<string> {
 
 export async function pdfToCopyPaste(buffer: Buffer): Promise<string> {
   try {
+    const pdfParse = await getPdfParse();
     const data = await pdfParse(buffer);
     const text = data.text || '';
     const items = parseItemsFromText(text);
