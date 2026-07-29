@@ -17,10 +17,11 @@ export default function ConvertPage() {
   const [preview, setPreview] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [progress, setProgress] = useState(0);
+  const [warning, setWarning] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
 
   const reset = () => {
-    setFile(null); setPreview(null); setError(''); setProgress(0);
+    setFile(null); setPreview(null); setError(''); setWarning(''); setProgress(0);
     if (fileRef.current) fileRef.current.value = '';
   };
 
@@ -35,6 +36,7 @@ export default function ConvertPage() {
       setFile(f);
       setInputType(ext as InputType);
       setError('');
+      setWarning('');
       setPreview(null);
     }
   };
@@ -51,121 +53,38 @@ export default function ConvertPage() {
     setConverting(true);
     setProgress(0);
     setError('');
+    setWarning('');
     setPreview(null);
 
-    const tick = setInterval(() => setProgress(p => Math.min(p + 10, 90)), 150);
+    const tick = setInterval(() => setProgress(p => Math.min(p + 8, 85)), 120);
 
     try {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('targetFormat', outputType);
+
       if (mode === 'ai') {
-        // AI mode: extract structured data then format as CSV/copy-paste
-        const fd = new FormData();
-        fd.append('file', file);
-        
-        const token = typeof window !== 'undefined' ? localStorage.getItem('salessettle_token') : null;
-        const res = await fetch('/api/ai/extract', {
-          method: 'POST',
-          body: fd,
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
-        });
+        fd.append('mode', 'ai');
+      }
 
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({ error: 'AI extraction failed' }));
-          throw new Error(err.error || 'AI extraction failed');
-        }
+      const res = await authFetch('/api/convert', {
+        method: 'POST',
+        body: fd,
+      });
 
-        const data = await res.json();
-        const extracted = data.extracted;
+      clearInterval(tick);
+      setProgress(100);
 
-        if (outputType === 'csv') {
-          // Convert extracted data to CSV
-          const headers = ['S.No', 'Item Name', 'HSN/SAC', 'Qty', 'Unit', 'Rate', 'Taxable', 'GST Rate', 'CGST', 'SGST', 'GST Amount', 'Total'];
-          const rows = extracted.items?.map((item: any, i: number) => [
-            i + 1,
-            `"${(item.description || '').replace(/"/g, '""')}"`,
-            item.hsn || '',
-            item.quantity || 0,
-            item.unit || 'PCS',
-            item.rate || 0,
-            item.taxable || 0,
-            item.gstRate || 0,
-            item.cgst || 0,
-            item.sgst || 0,
-            item.gst || 0,
-            item.total || 0,
-          ]) || [];
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Conversion failed' }));
+        throw new Error(err.error || `Conversion failed (${res.status})`);
+      }
 
-          // Add totals row
-          if (extracted.totals) {
-            rows.push([
-              '', 'TOTAL', '', extracted.totals.totalQty || 0, '', '', 
-              extracted.totals.taxableAmount || 0, '', '', '', 
-              extracted.totals.totalGst || 0, extracted.totals.grandTotal || 0
-            ]);
-          }
+      const text = await res.text();
+      setPreview(text);
 
-          const csv = [headers.join(','), ...rows.map((r: any[]) => r.join(','))].join('\n');
-          setPreview(csv);
-        } else {
-          // Copy-paste format
-          let text = `# Converted from: ${file.name}\n`;
-          text += `# Date: ${new Date().toLocaleDateString('en-IN')}\n\n`;
-          
-          if (extracted.seller) {
-            text += `## Seller\n`;
-            if (extracted.seller.name) text += `Company: ${extracted.seller.name}\n`;
-            if (extracted.seller.gstin) text += `GSTIN: ${extracted.seller.gstin}\n`;
-            if (extracted.seller.phone) text += `Phone: ${extracted.seller.phone}\n`;
-            if (extracted.seller.address) text += `Address: ${extracted.seller.address}\n`;
-            text += '\n';
-          }
-
-          if (extracted.buyer) {
-            text += `## Customer\n`;
-            if (extracted.buyer.name) text += `Name: ${extracted.buyer.name}\n`;
-            if (extracted.buyer.phone) text += `Phone: ${extracted.buyer.phone}\n`;
-            if (extracted.buyer.address) text += `Address: ${extracted.buyer.address}\n`;
-            text += '\n';
-          }
-
-          if (extracted.items?.length) {
-            text += `## Items\n`;
-            text += `# | Item Name | HSN/SAC | Qty | Unit | Rate | GST | Total\n`;
-            text += `|---|-----------|---------|-----|------|------|-----|------|\n`;
-            extracted.items.forEach((item: any, i: number) => {
-              text += `| ${i + 1} | ${item.description || ''} | ${item.hsn || ''} | ${item.quantity || 0} | ${item.unit || 'PCS'} | ${item.rate || 0} | ${item.gst || 0} | ${item.total || 0} |\n`;
-            });
-            text += '\n';
-          }
-
-          if (extracted.totals) {
-            text += `## Totals\n`;
-            text += `Subtotal: ${extracted.totals.taxableAmount || 0}\n`;
-            text += `GST: ${extracted.totals.totalGst || 0}\n`;
-            text += `Grand Total: ${extracted.totals.grandTotal || 0}\n`;
-          }
-
-          setPreview(text);
-        }
-      } else {
-        // Fast mode: direct conversion using existing API
-        const fd = new FormData();
-        fd.append('file', file);
-        fd.append('targetFormat', outputType);
-
-        const token = typeof window !== 'undefined' ? localStorage.getItem('salessettle_token') : null;
-        const res = await fetch('/api/convert', {
-          method: 'POST',
-          body: fd,
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
-        });
-
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({ error: 'Conversion failed' }));
-          throw new Error(err.error || 'Conversion failed');
-        }
-
-        const text = await res.text();
-        setPreview(text);
+      if (mode === 'ai') {
+        setWarning('AI mode used local Ollama model. If results are poor, try Fast mode.');
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Conversion failed');
@@ -178,22 +97,26 @@ export default function ConvertPage() {
 
   const handleDownload = () => {
     if (!preview) return;
-    const blob = new Blob([preview], { type: outputType === 'csv' ? 'text/csv' : 'text/plain' });
+    const blob = new Blob([preview], { type: outputType === 'csv' ? 'text/csv;charset=utf-8' : 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = file ? `${file.name.replace(/\.[^/.]+$/, '')}_converted.${outputType === 'csv' ? 'csv' : 'txt'}` : 'converted.txt';
+    const ext = outputType === 'csv' ? 'csv' : 'txt';
+    a.download = file ? `${file.name.replace(/\.[^/.]+$/, '')}_converted.${ext}` : `converted.${ext}`;
     document.body.appendChild(a);
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
   };
 
-  const handleCopy = () => {
+  const handleCopy = async () => {
     if (!preview) return;
-    navigator.clipboard.writeText(preview).then(() => {
+    try {
+      await navigator.clipboard.writeText(preview);
       alert('Copied to clipboard!');
-    });
+    } catch {
+      setError('Failed to copy to clipboard');
+    }
   };
 
   return (
@@ -314,6 +237,13 @@ export default function ConvertPage() {
             </div>
           )}
 
+          {/* Warning */}
+          {warning && (
+            <div className="p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-400 rounded-lg text-sm font-medium text-center">
+              {warning}
+            </div>
+          )}
+
           {/* Error */}
           {error && (
             <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 rounded-lg text-sm font-medium text-center">
@@ -358,7 +288,7 @@ export default function ConvertPage() {
         </h4>
         <ul className="mt-2 space-y-1 text-xs text-blue-700 dark:text-blue-400">
           <li><strong>Fast mode:</strong> Direct file parsing — instant results for clean PDFs and Excel files.</li>
-          <li><strong>AI mode:</strong> Uses local Ollama model to intelligently extract and structure data from messy invoices.</li>
+          <li><strong>AI mode:</strong> Uses local Ollama model to intelligently extract and structure data from messy invoices, with automatic fallback.</li>
           <li><strong>Copy-Paste format:</strong> Optimized for directly pasting into WhatsApp, Excel, or email.</li>
         </ul>
       </div>
