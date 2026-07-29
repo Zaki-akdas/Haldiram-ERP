@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '@/components/AuthProvider';
 
 type ReportType = 'sales' | 'collections' | 'customers' | 'salespeople';
@@ -30,24 +30,29 @@ export default function ReportsPage() {
   const [reportType, setReportType] = useState<ReportType>('sales');
   const [data, setData] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
 
   async function fetchReport() {
     setLoading(true);
+    setRefreshing(true);
     try {
       const res = await authFetch(`/api/reports?type=${reportType}`);
       if (!res.ok) throw new Error('Failed to fetch');
       const json = await res.json();
       setData(json);
+      setLastRefreshed(new Date());
     } catch (err) {
       console.error(err);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }
 
   useEffect(() => {
     fetchReport();
-  }, [reportType]);
+  }, [reportType, authFetch]);
 
   const reportTabs = [
     { id: 'sales' as const, label: '📈 Sales', icon: '📈' },
@@ -58,9 +63,24 @@ export default function ReportsPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-800 dark:text-white">Reports</h1>
-        <p className="text-slate-500 dark:text-slate-400">Analytics and insights</p>
+      <div className="flex items-start sm:items-center justify-between flex-col sm:flex-row gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-800 dark:text-white">Reports</h1>
+          <p className="text-slate-500 dark:text-slate-400">Analytics and insights</p>
+          {lastRefreshed && (
+            <p className="text-[10px] text-zinc-400 mt-1 font-medium">Last updated: {lastRefreshed.toLocaleTimeString('en-IN')}</p>
+          )}
+        </div>
+        <button
+          onClick={fetchReport}
+          disabled={refreshing}
+          className="inline-flex items-center gap-2 px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl text-xs font-bold uppercase tracking-widest text-slate-600 dark:text-slate-300 hover:border-emerald-500 hover:text-emerald-600 transition-colors disabled:opacity-60"
+        >
+          <svg className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          {refreshing ? 'Refreshing' : 'Refresh'}
+        </button>
       </div>
 
       {/* Report Type Tabs */}

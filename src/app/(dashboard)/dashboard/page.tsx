@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '@/components/AuthProvider';
 
 function formatCurrency(amount: number): string {
@@ -16,20 +16,31 @@ export default function DashboardPage() {
   const [data, setData] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
+
+  async function fetchDashboard() {
+    try {
+      const res = await authFetch('/api/dashboard');
+      if (!res.ok) throw new Error('Failed to fetch dashboard');
+      const json = await res.json();
+      setData(json);
+      setLastRefreshed(new Date());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error loading dashboard');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    setError('');
+    await fetchDashboard();
+  }, [authFetch]);
 
   useEffect(() => {
-    async function fetchDashboard() {
-      try {
-        const res = await authFetch('/api/dashboard');
-        if (!res.ok) throw new Error('Failed to fetch dashboard');
-        const json = await res.json();
-        setData(json);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Error loading dashboard');
-      } finally {
-        setLoading(false);
-      }
-    }
     fetchDashboard();
   }, [authFetch]);
 
@@ -64,10 +75,25 @@ export default function DashboardPage() {
         <div>
           <h1 className="text-4xl font-black text-zinc-900 dark:text-white tracking-tighter">Business Overview</h1>
           <p className="text-zinc-500 dark:text-zinc-400 mt-1 font-medium">Tracking live distribution and cash settlements</p>
+          {lastRefreshed && (
+            <p className="text-[10px] text-zinc-400 mt-1 font-medium">Last updated: {lastRefreshed.toLocaleTimeString('en-IN')}</p>
+          )}
         </div>
-        <div className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 rounded-2xl border border-zinc-200 dark:border-zinc-700">
-          <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
-          <span className="text-[10px] font-black uppercase tracking-widest text-zinc-600 dark:text-zinc-400">System Healthy</span>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing || loading}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-2xl text-xs font-bold uppercase tracking-widest text-zinc-700 dark:text-zinc-300 hover:border-emerald-500 hover:text-emerald-600 transition-colors disabled:opacity-60"
+          >
+            <svg className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            {refreshing ? 'Refreshing' : 'Refresh'}
+          </button>
+          <div className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 rounded-2xl border border-zinc-200 dark:border-zinc-700">
+            <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
+            <span className="text-[10px] font-black uppercase tracking-widest text-zinc-600 dark:text-zinc-400">System Healthy</span>
+          </div>
         </div>
       </div>
 
