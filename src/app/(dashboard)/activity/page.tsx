@@ -56,27 +56,33 @@ export default function ActivityPage() {
   const { authFetch } = useAuth();
   const [logs, setLogs] = useState<ActivityLog[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
 
   useEffect(() => {
     async function fetchLogs() {
       setLoading(true);
+      setError(null);
       try {
         const res = await authFetch(`/api/activity?page=${page}&limit=50`);
-        if (!res.ok) throw new Error('Failed to fetch');
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({ error: 'Failed to load logs' }));
+          throw new Error(data.error || 'Failed to fetch');
+        }
         const data = await res.json();
-        setLogs(data.logs);
-        setTotalPages(data.pagination.totalPages);
+        setLogs(data.logs || []);
+        setTotalPages(data.pagination?.totalPages || 1);
       } catch (err) {
         console.error(err);
+        setError(err instanceof Error ? err.message : 'Failed to load logs');
       } finally {
         setLoading(false);
       }
     }
-    
+
     fetchLogs();
-  }, [page]);
+  }, [page, authFetch]);
 
   return (
     <div className="space-y-6">
@@ -90,6 +96,8 @@ export default function ActivityPage() {
           <div className="p-8 text-center">
             <div className="w-8 h-8 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
           </div>
+        ) : error ? (
+          <div className="p-8 text-center text-red-500">{error}</div>
         ) : logs.length === 0 ? (
           <div className="p-8 text-center text-slate-500">No activity recorded yet</div>
         ) : (

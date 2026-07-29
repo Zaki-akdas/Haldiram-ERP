@@ -15,6 +15,7 @@ const navItems = [
   { href: '/settlements', label: 'Collections', icon: '💰', roles: ['admin', 'manager', 'salesperson'] },
   { href: '/reports', label: 'Analytics', icon: '📈', roles: ['admin', 'manager'] },
   { href: '/activity', label: 'System Logs', icon: '📝', roles: ['admin', 'manager'] },
+  { href: '/reference', label: 'Reference', icon: '📚', roles: ['admin', 'manager', 'salesperson'] },
 ];
 
 export default function Sidebar({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {

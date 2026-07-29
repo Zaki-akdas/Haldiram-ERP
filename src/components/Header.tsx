@@ -2,6 +2,7 @@
 
 import { useAuth } from './AuthProvider';
 import { useState, useEffect, useCallback } from 'react';
+import Link from 'next/link';
 
 interface HeaderProps {
   onMenuClick: () => void;
@@ -70,6 +71,13 @@ export default function Header({ onMenuClick }: HeaderProps) {
           </div>
 
           <div className="flex items-center p-1 bg-zinc-100 dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800">
+            <Link
+              href="/reference"
+              className="p-2 rounded-xl text-zinc-500 hover:text-emerald-500 transition-colors"
+              title="Quick Reference"
+            >
+              📚
+            </Link>
             <button
               onClick={() => setTheme(false)}
               className={`p-2 rounded-xl transition-all duration-300 ${!darkMode ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}

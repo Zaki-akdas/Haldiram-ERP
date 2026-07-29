@@ -18,7 +18,7 @@ export async function GET(request: NextRequest) {
 
     let query = supabase
       .from('activity_logs')
-      .select('*, users(name)', { count: 'exact' })
+      .select('*', { count: 'exact' })
       .order('created_at', { ascending: false });
 
     if (!isAdmin) query = query.eq('user_id', user.id);
