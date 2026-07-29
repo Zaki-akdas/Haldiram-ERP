@@ -58,8 +58,12 @@ export async function GET(
         createdAt: order.created_at,
       },
       items: (items || []).map((i: any) => ({
-        ...i,
+        productName: i.product_name || '',
+        erpId: i.erp_id || '',
+        quantity: Number(i.quantity || 0),
+        unit: i.unit || 'PCS',
         unitPrice: Number(i.unit_price || 0),
+        gstRate: Number(i.gst_rate || 0),
         taxableAmount: Number(i.taxable_amount || 0),
         gstAmount: Number(i.gst_amount || 0),
         totalAmount: Number(i.total_amount || 0),
