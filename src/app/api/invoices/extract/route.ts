@@ -454,21 +454,66 @@ function extractAll(text: string): FullExtraction {
       const sno = parseInt(simpleMatch[1], 10);
       if (sno > 0 && sno < 500) {
         const rest = simpleMatch[2];
-        const allNums = [...rest.matchAll(/(?<=\s)([\d,]+\.?\d*)(?=\s|$)/g)].map(m => num(m[1]));
-        if (allNums.length >= 2) {
-          const firstNumPos = rest.search(/\s\d/);
-          const description = firstNumPos > 0 ? clean(rest.substring(0, firstNumPos)) : '';
-          const n = allNums;
+        const numMatches = [...rest.matchAll(/(?<=\s)([\d,]+\.?\d*)(?=\s|$)/g)].map(m => ({
+          value: num(m[1]),
+          index: m.index
+        }));
+        
+        if (numMatches.length >= 2) {
+          let description = '';
+          let qty = 0, rate = 0, taxable = 0, gstAmt = 0, total = 0;
+          
+          if (numMatches.length >= 3) {
+            const totalVal = numMatches[numMatches.length - 1].value;
+            total = totalVal;
+            
+            // Find qty: from the end, skip total and decimals (GST/rate), first integer is qty
+            let qtyIdx = -1;
+            for (let i = numMatches.length - 2; i >= 0; i--) {
+              if (!Number.isInteger(numMatches[i].value)) continue;
+              qtyIdx = i;
+              break;
+            }
+            
+            if (qtyIdx >= 0) {
+              description = clean(rest.substring(0, numMatches[qtyIdx].index));
+              qty = numMatches[qtyIdx].value;
+              rate = numMatches.length > qtyIdx + 1 ? numMatches[qtyIdx + 1].value : 0;
+              
+              // Find GST: first decimal between qty and total
+              for (let i = numMatches.length - 2; i > qtyIdx; i--) {
+                if (!Number.isInteger(numMatches[i].value)) {
+                  gstAmt = numMatches[i].value;
+                  break;
+                }
+              }
+            } else {
+              const n = numMatches.map(m => m.value);
+              const firstNumPos = rest.search(/\s\d/);
+              description = firstNumPos > 0 ? clean(rest.substring(0, firstNumPos)) : '';
+              qty = n[0] || 0;
+              rate = n.length > 1 ? n[1] : 0;
+              total = n[n.length - 1] || 0;
+            }
+          } else {
+            const firstNumPos = rest.search(/\s\d/);
+            description = firstNumPos > 0 ? clean(rest.substring(0, firstNumPos)) : '';
+            const n = numMatches.map(m => m.value);
+            qty = n[0] || 0;
+            rate = n.length > 1 ? n[1] : 0;
+            total = n[n.length - 1] || 0;
+          }
+          
           items.push({
             sno, erpId: '', description,
-            hsn: '', quantity: n[0] || 0, freeQty: 0, unit: 'PCS',
-            mrp: 0, rate: n.length > 1 ? n[1] : 0, discount: 0,
-            taxable: n.length > 3 ? n[n.length - 4] : 0,
+            hsn: '', quantity: qty, freeQty: 0, unit: 'PCS',
+            mrp: 0, rate, discount: 0,
+            taxable: rate * qty,
             gstRate: 0,
-            cgst: n.length > 2 ? n[n.length - 3] : 0,
-            sgst: n.length > 1 ? n[n.length - 2] : 0,
-            gst: 0,
-            total: n[n.length - 1] || 0,
+            cgst: gstAmt / 2,
+            sgst: gstAmt / 2,
+            gst: gstAmt,
+            total: total || (rate * qty + gstAmt),
           });
         }
       }
