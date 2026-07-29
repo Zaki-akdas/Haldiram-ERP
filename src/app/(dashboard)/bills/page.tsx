@@ -40,10 +40,12 @@ export default function BillsPage() {
   const [invoiceId, setInvoiceId] = useState<number | null>(null);
   const [mode, setMode] = useState<'regex' | 'ai'>('regex');
   const [downloading, setDownloading] = useState(false);
+  const [editingCustomer, setEditingCustomer] = useState(false);
+  const [customerNameInput, setCustomerNameInput] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
 
   const reset = () => {
-    setFile(null); setTextInput(''); setExtracted(null); setError(''); setInvoiceId(null); setMode('regex'); setDownloading(false);
+    setFile(null); setTextInput(''); setExtracted(null); setError(''); setInvoiceId(null); setMode('regex'); setDownloading(false); setEditingCustomer(false); setCustomerNameInput('');
     if (fileRef.current) fileRef.current.value = '';
   };
 
@@ -344,8 +346,51 @@ export default function BillsPage() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="bg-slate-50 dark:bg-slate-700/30 rounded-lg p-3 border border-slate-100 dark:border-slate-700">
                   <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Customer / Shop</p>
-                  <p className="font-bold text-slate-800 dark:text-white">{extracted.buyer?.name || 'Not detected'}</p>
-                  {extracted.buyer?.phone && <p className="text-xs text-slate-500 mt-1">📞 {extracted.buyer.phone}</p>}
+                  {editingCustomer ? (
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={customerNameInput}
+                        onChange={(e) => setCustomerNameInput(e.target.value)}
+                      onBlur={() => {
+                        if (!extracted) return;
+                        setExtracted({
+                          ...extracted,
+                          buyer: { ...(extracted.buyer || { name: '', phone: '', address: '' }), name: customerNameInput } as Buyer
+                        } as ExtractedData);
+                        setEditingCustomer(false);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          if (!extracted) return;
+                          setExtracted({
+                            ...extracted,
+                            buyer: { ...(extracted.buyer || { name: '', phone: '', address: '' }), name: customerNameInput } as Buyer
+                          } as ExtractedData);
+                          setEditingCustomer(false);
+                        }
+                      }}
+                        className="flex-1 px-2 py-1 bg-white dark:bg-slate-800 border border-emerald-500 rounded text-sm font-bold text-slate-800 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                        placeholder="Enter customer name"
+                        autoFocus
+                      />
+                    </div>
+                  ) : (
+                    <div
+                      className="flex items-center gap-2 cursor-pointer group"
+                      onClick={() => {
+                        const currentName = extracted?.buyer?.name || '';
+                        setCustomerNameInput(currentName);
+                        setEditingCustomer(true);
+                      }}
+                    >
+                      <p className={`font-bold flex-1 ${!extracted?.buyer?.name ? 'text-red-500' : 'text-slate-800 dark:text-white'}`}>
+                        {extracted?.buyer?.name || 'Not detected — tap to edit'}
+                      </p>
+                      <span className="text-xs text-slate-400 group-hover:text-emerald-500 transition-colors">✏️</span>
+                    </div>
+                  )}
+                  {extracted.buyer?.phone && !editingCustomer && <p className="text-xs text-slate-500 mt-1">📞 {extracted.buyer.phone}</p>}
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="bg-slate-50 dark:bg-slate-700/30 rounded-lg p-3 border border-slate-100 dark:border-slate-700">

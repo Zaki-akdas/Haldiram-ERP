@@ -59,11 +59,13 @@ export default function InvoicesPage() {
   const [invoiceId, setInvoiceId] = useState<number | null>(null);
   const [mode, setMode] = useState<'regex' | 'ai'>('regex');
   const [downloading, setDownloading] = useState(false);
+  const [editingCustomer, setEditingCustomer] = useState(false);
+  const [customerNameInput, setCustomerNameInput] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const reset = () => {
-    setFile(null); setExtracted(null); setValidation(null); setRecommendation(null); setError(''); setInvoiceId(null); setMode('regex'); setDownloading(false);
+    setFile(null); setExtracted(null); setValidation(null); setRecommendation(null); setError(''); setInvoiceId(null); setMode('regex'); setDownloading(false); setEditingCustomer(false); setCustomerNameInput('');
     if (fileRef.current) fileRef.current.value = '';
   };
 
@@ -466,7 +468,50 @@ export default function InvoicesPage() {
                   {extracted.buyer && (extracted.buyer.name || extracted.buyer.phone) && (
                     <div className="bg-slate-50 dark:bg-slate-700/50 rounded-lg p-4">
                       <h4 className="text-xs font-bold text-slate-400 uppercase mb-2">👤 Buyer / Customer</h4>
-                      {extracted.buyer.name && <p className="font-semibold text-slate-800 dark:text-white">{extracted.buyer.name}</p>}
+                      {editingCustomer ? (
+                        <div className="flex gap-2 mb-2">
+                          <input
+                            type="text"
+                            value={customerNameInput}
+                            onChange={(e) => setCustomerNameInput(e.target.value)}
+                            onBlur={() => {
+                              if (!extracted) return;
+                              setExtracted({
+                                ...extracted,
+                                buyer: { ...(extracted.buyer || { name: '', phone: '', address: '' }), name: customerNameInput } as Buyer
+                              });
+                              setEditingCustomer(false);
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                if (!extracted) return;
+                                setExtracted({
+                                  ...extracted,
+                                  buyer: { ...(extracted.buyer || { name: '', phone: '', address: '' }), name: customerNameInput } as Buyer
+                                });
+                                setEditingCustomer(false);
+                              }
+                            }}
+                            className="flex-1 px-2 py-1 bg-white dark:bg-slate-800 border border-emerald-500 rounded text-sm font-bold text-slate-800 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                            placeholder="Enter customer name"
+                            autoFocus
+                          />
+                        </div>
+                      ) : (
+                        <div
+                          className="flex items-center gap-2 cursor-pointer group mb-2"
+                          onClick={() => {
+                            const currentName = extracted?.buyer?.name || '';
+                            setCustomerNameInput(currentName);
+                            setEditingCustomer(true);
+                          }}
+                        >
+                          <p className={`font-semibold flex-1 ${!extracted?.buyer?.name ? 'text-red-500' : 'text-slate-800 dark:text-white'}`}>
+                            {extracted?.buyer?.name || 'Not detected — tap to edit'}
+                          </p>
+                          <span className="text-xs text-slate-400 group-hover:text-emerald-500 transition-colors">✏️</span>
+                        </div>
+                      )}
                       {extracted.buyer.address && <p className="text-sm text-slate-500 mt-1">{extracted.buyer.address}</p>}
                       {extracted.buyer.phone && <p className="text-sm mt-2">📞 {extracted.buyer.phone}</p>}
                     </div>
