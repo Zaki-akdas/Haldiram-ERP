@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { pdfToCsv, excelToCsv, excelToCopyPaste, pdfToCopyPaste } from '@/lib/converters';
-import { extractTextFromFile, callOllama, normalizeExtraction, computeConfidence } from '@/lib/ai-extract';
+import { extractTextFromFile } from '@/lib/ai-extract';
+import { AIProvider, getDefaultConfig, extractWithProvider } from '@/lib/ai-service';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,6 +17,7 @@ export async function POST(request: NextRequest) {
     const file = formData.get('file') as File | null;
     const targetFormat = (formData.get('targetFormat') as string) || 'csv';
     const mode = (formData.get('mode') as string) || 'fast';
+    const providerParam = (formData.get('provider') as string) || 'ollama';
 
     if (!file) {
       return NextResponse.json({ error: 'File is required' }, { status: 400 });
@@ -31,44 +33,33 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: `Unsupported target format: ${targetFormat}` }, { status: 400 });
     }
 
-    const arrayBuffer = await file.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
+    const aiProvider = providerParam as AIProvider;
 
-    // AI mode: use Ollama for intelligent extraction
+    // AI mode
     if (mode === 'ai') {
+      const arrayBuffer = await file.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
       const text = await extractTextFromFile(buffer, ext);
-      
+
       if (!text || text.trim().length === 0) {
         return NextResponse.json({ error: 'Could not extract text from file. Try Fast mode or ensure the file contains readable text.' }, { status: 400 });
       }
 
-      const truncated = text.length > 20000 ? text.substring(0, 20000) + '\n\n[TRUNCATED]' : text;
-      
-      let rawAi = null;
-      let aiError = null;
-      
-      try {
-        rawAi = await callOllama(truncated);
-      } catch (err) {
-        console.warn('Ollama extraction failed:', err);
-        aiError = err instanceof Error ? err.message : 'Ollama unavailable';
-      }
+      const config = getDefaultConfig(aiProvider);
+      const result = await extractWithProvider(text, config);
 
-      const extracted = rawAi ? normalizeExtraction(rawAi) : null;
-      const confidence = extracted ? computeConfidence(extracted) : 0;
-
-      if (!extracted || extracted.items.length === 0) {
-        return NextResponse.json({ 
-          error: aiError 
-            ? `AI extraction failed: ${aiError}. Please ensure Ollama is running with a compatible model.`
-            : 'AI could not extract any items from this document. Try Fast mode instead.',
-          tip: 'Fast mode uses direct parsing and works without Ollama.'
+      if (!result.normalized || !result.normalized.items || result.normalized.items.length === 0) {
+        const errorMsg = result.error || 'AI extraction returned no items';
+        return NextResponse.json({
+          error: `${errorMsg}. Try Fast mode instead.`,
+          tip: 'Fast mode uses direct parsing and works without AI providers.',
         }, { status: 422 });
       }
 
-      // Format output based on targetFormat
-      let outputText: string;
-      
+      const selectedProvider = aiProvider;
+      const extracted = result.normalized;
+      const confidence = result.confidence;
+
       if (targetFormat === 'csv') {
         const headers = ['S.No', 'Item Name', 'HSN/SAC', 'Qty', 'Unit', 'Rate', 'Taxable', 'GST Rate', 'CGST', 'SGST', 'GST Amount', 'Total'];
         const rows = extracted.items.map((item: any, i: number) => [
@@ -94,13 +85,24 @@ export async function POST(request: NextRequest) {
           ]);
         }
 
-        outputText = [headers.join(','), ...rows.map((r: any[]) => r.join(','))].join('\n');
-        outputText = `# AI Extracted from: ${file.name}\n# Confidence: ${confidence}%\n# Seller: ${extracted.seller.name || 'N/A'}\n# Buyer: ${extracted.buyer.name || 'N/A'}\n\n${outputText}`;
+        const csv = [headers.join(','), ...rows.map((r: any[]) => r.join(','))].join('\n');
+        const providerLabel = selectedProvider === 'gemini' ? 'Gemini' : selectedProvider === 'azure' ? 'Azure OpenAI' : 'Ollama';
+        const finalCsv = `# AI ${providerLabel} Extracted from: ${file.name}\n# Confidence: ${confidence}%\n# Seller: ${extracted.seller.name || 'N/A'}\n# Buyer: ${extracted.buyer.name || 'N/A'}\n\n${csv}`;
+
+        return new NextResponse(finalCsv, {
+          status: 200,
+          headers: {
+            'Content-Type': 'text/csv;charset=utf-8',
+            'Content-Disposition': `attachment; filename="${file.name.replace(/\.[^/.]+$/, '')}_ai_${selectedProvider}.csv"`,
+          },
+        });
       } else {
         let text = `# Converted from: ${file.name}\n`;
+        const providerLabel = selectedProvider === 'gemini' ? 'Google Gemini' : selectedProvider === 'azure' ? 'Azure OpenAI' : 'Local Ollama';
+        text += `# AI Provider: ${providerLabel}\n`;
         text += `# Date: ${new Date().toLocaleDateString('en-IN')}\n`;
         text += `# Confidence: ${confidence}%\n\n`;
-        
+
         if (extracted.seller.name) {
           text += `## Seller\n`;
           text += `Company: ${extracted.seller.name}\n`;
@@ -135,24 +137,20 @@ export async function POST(request: NextRequest) {
           text += `Grand Total: ${extracted.totals.grandTotal || 0}\n`;
         }
 
-        outputText = text;
+        return new NextResponse(text, {
+          status: 200,
+          headers: {
+            'Content-Type': 'text/plain;charset=utf-8',
+            'Content-Disposition': `attachment; filename="${file.name.replace(/\.[^/.]+$/, '')}_ai_${selectedProvider}_copy-paste.txt"`,
+          },
+        });
       }
-
-      const baseName = file.name.replace(/\.[^/.]+$/, '');
-      const downloadName = `${baseName}_ai_${targetFormat === 'csv' ? 'csv' : 'copy-paste'}.${targetFormat === 'csv' ? 'csv' : 'txt'}`;
-
-      return new NextResponse(outputText, {
-        status: 200,
-        headers: {
-          'Content-Type': targetFormat === 'csv' ? 'text/csv;charset=utf-8' : 'text/plain;charset=utf-8',
-          'Content-Disposition': `attachment; filename="${downloadName}"`,
-          'X-AI-Confidence': String(confidence),
-          'X-AI-Source': rawAi ? 'ollama' : 'none',
-        },
-      });
     }
 
     // Fast mode: existing logic
+    const arrayBuffer = await file.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
     let convertedText: string;
     let contentType: string;
     let extension: string;

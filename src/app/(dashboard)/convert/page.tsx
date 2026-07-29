@@ -6,6 +6,7 @@ import { useAuth } from '@/components/AuthProvider';
 type InputType = 'pdf' | 'excel' | 'csv';
 type OutputType = 'csv' | 'copy-paste';
 type Mode = 'fast' | 'ai';
+type AIProvider = 'ollama' | 'gemini' | 'azure';
 
 export default function ConvertPage() {
   const { authFetch } = useAuth();
@@ -13,6 +14,7 @@ export default function ConvertPage() {
   const [inputType, setInputType] = useState<InputType>('pdf');
   const [outputType, setOutputType] = useState<OutputType>('csv');
   const [mode, setMode] = useState<Mode>('fast');
+  const [provider, setProvider] = useState<AIProvider>('ollama');
   const [converting, setConverting] = useState(false);
   const [preview, setPreview] = useState<string | null>(null);
   const [error, setError] = useState('');
@@ -65,6 +67,7 @@ export default function ConvertPage() {
 
       if (mode === 'ai') {
         fd.append('mode', 'ai');
+        fd.append('provider', provider);
       }
 
       const res = await authFetch('/api/convert', {
@@ -84,7 +87,8 @@ export default function ConvertPage() {
       setPreview(text);
 
       if (mode === 'ai') {
-        setWarning('AI mode used local Ollama model. If results are poor, try Fast mode.');
+        const providerLabel = provider === 'ollama' ? 'Local Ollama' : provider === 'gemini' ? 'Google Gemini' : 'Azure OpenAI';
+        setWarning(`AI mode used ${providerLabel}. If results are poor, try Fast mode or switch provider.`);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Conversion failed');
@@ -166,8 +170,8 @@ export default function ConvertPage() {
             )}
           </div>
 
-          {/* Mode & Output Selection */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* Mode, Provider & Output Selection */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             <div>
               <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Mode</label>
               <div className="flex border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden">
@@ -185,10 +189,30 @@ export default function ConvertPage() {
                     mode === 'ai' ? 'bg-purple-600 text-white' : 'text-slate-600 hover:bg-slate-50'
                   }`}
                 >
-                  🤖 AI (Ollama)
+                  🤖 AI
                 </button>
               </div>
             </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase mb-2">AI Provider</label>
+              <select
+                value={provider}
+                onChange={e => setProvider(e.target.value as AIProvider)}
+                disabled={mode !== 'ai'}
+                className="w-full px-3 py-2 text-sm border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-slate-800 dark:text-white disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <option value="ollama">🖥️ Local Ollama</option>
+                <option value="gemini">☁️ Google Gemini</option>
+                <option value="azure">🌐 Azure OpenAI</option>
+              </select>
+              {mode === 'ai' && (
+                <p className="text-[10px] text-slate-400 mt-1">
+                  {provider === 'ollama' ? 'Requires local Ollama server' : provider === 'gemini' ? 'Requires GEMINI_API_KEY' : 'Requires Azure OpenAI config'}
+                </p>
+              )}
+            </div>
+
             <div>
               <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Output Format</label>
               <div className="flex border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden">
@@ -288,7 +312,7 @@ export default function ConvertPage() {
         </h4>
         <ul className="mt-2 space-y-1 text-xs text-blue-700 dark:text-blue-400">
           <li><strong>Fast mode:</strong> Direct file parsing — instant results for clean PDFs and Excel files.</li>
-          <li><strong>AI mode:</strong> Uses local Ollama model to intelligently extract and structure data from messy invoices, with automatic fallback.</li>
+          <li><strong>AI mode:</strong> Choose between Local Ollama, Google Gemini, or Azure OpenAI for intelligent extraction, with automatic fallback.</li>
           <li><strong>Copy-Paste format:</strong> Optimized for directly pasting into WhatsApp, Excel, or email.</li>
         </ul>
       </div>
