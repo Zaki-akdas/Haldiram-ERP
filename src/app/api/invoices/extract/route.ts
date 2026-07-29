@@ -225,16 +225,37 @@ function extractAll(text: string): FullExtraction {
   if (uniquePhones.length >= 3) invoice.employeeContact = uniquePhones[2];
 
   // ── 5. Invoice number ──
+  // Line-based extraction for invoice number (handles **Invoice No.:** 993)
+  for (let i = 0; i < lines.length; i++) {
+    if (/invoice\s*(?:no\.?|number)/i.test(lines[i])) {
+      let val = lines[i].replace(/.*invoice\s*(?:no\.?|number)/i, '').trim();
+      val = val.replace(/^[:\s.*]+/, '').replace(/[\s.*]+$/, '').trim();
+      if (val && val.length > 0 && !/date|bill\s*to|gstin|state|customer/i.test(val)) {
+        invoice.number = val;
+        break;
+      }
+      if (i + 1 < lines.length) {
+        let next = lines[i + 1].trim();
+        next = next.replace(/^[:\s.*]+/, '').replace(/[\s.*]+$/, '').trim();
+        if (next && !/date|bill\s*to|gstin|state|customer/i.test(next)) {
+          invoice.number = next;
+          break;
+        }
+      }
+    }
+  }
+
   // Try specific patterns first
-  const invPatterns = [
-    /(?:Invoice|Bill|Inv)[\s.#:No]*[:\s]*([A-Z]{2,6}\/\d{2,4}-\d{2,4}\/\d+)/i,
-    /\b([A-Z]{2,6}\/\d{2,4}-\d{2,4}\/\d+)\b/,
-    /Invoice\s*(?:No\.?|Number)[:\s]*([A-Z0-9][\w\-\/]*)/i,
-    /(?:Invoice|Bill)[\s.#:No]*[:\s]*([A-Z0-9][\w\-\/]+)/i,
-  ];
-  for (const p of invPatterns) {
-    const m = full.match(p);
-    if (m) { invoice.number = m[1].trim(); break; }
+  if (!invoice.number) {
+    const invPatterns = [
+      /(?:Invoice|Bill|Inv)[\s.:]*?(?:No\.?|Number)?[\s.:\-]*?([A-Z]{2,6}\/\d{2,4}[\w\-\/]*)/i,
+      /\b([A-Z]{2,6}\/\d{2,4}[\w\-\/]*)\b/,
+      /(?:Invoice|Bill|Inv)[\s.:]*?([A-Z0-9][\w\-\/]*)/i,
+    ];
+    for (const p of invPatterns) {
+      const m = full.match(p);
+      if (m) { invoice.number = m[1].trim(); break; }
+    }
   }
 
   // ── 6. Date ──
@@ -259,6 +280,8 @@ function extractAll(text: string): FullExtraction {
   const companyPatterns = [
     /([\w\s]{3,}(?:ENTERPRISES|TRADERS|DISTRIBUTORS|INDUSTRIES|PVT|LTD|COMPANY|STORE|MART|AGENCY|CORPORATION)[\w\s.]*)/i,
     /^([A-Z][A-Z\s&.]{10,80})$/m,
+    /\*\*Company Name:\*\*\s*([A-Za-z][A-Za-z\s.&]{2,40})/i,
+    /Company Name[:\s]*([A-Za-z][A-Za-z\s.&]{2,40})/i,
   ];
   for (const p of companyPatterns) {
     const m = full.match(p);
@@ -278,7 +301,7 @@ function extractAll(text: string): FullExtraction {
 
   // ── 10. Buyer name ──
   const buyerPatterns = [
-    /(?:Bill\s*To|Ship\s*To|Sold\s*To|Customer|Party|Buyer)[:\s\n]*([A-Za-z][\w\s.&]{2,60})/i,
+    /(?:Bill\s*To|Ship\s*To|Sold\s*To|Customer\s*Name|Buyer)[:\s\n]+([A-Za-z][\w\s.&]{2,60})/i,
     /(?:M\/s|M\/S|Messrs)[.\s]*([A-Za-z][\w\s.&]{2,60})/i,
   ];
   for (const p of buyerPatterns) {
@@ -295,13 +318,15 @@ function extractAll(text: string): FullExtraction {
   if (!buyer.name) {
     for (let i = 0; i < lines.length; i++) {
       if (/bill\s*to|ship\s*to|sold\s*to|customer\s*name/i.test(lines[i])) {
-        const sameLine = lines[i].replace(/.*(?:bill\s*to|ship\s*to|sold\s*to|customer\s*name)\s*:?\s*/i, '').trim();
+        const rawLine = lines[i].replace(/.*(?:bill\s*to|ship\s*to|sold\s*to|customer\s*name)\s*:?\s*/i, '').trim();
+        const sameLine = rawLine.replace(/^\*+\s*/, '').trim();
         if (sameLine && sameLine.length > 2 && !/phone|mobile|gstin|contact/i.test(sameLine)) {
           buyer.name = clean(sameLine);
           break;
         }
         for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
           let ln = lines[j].trim();
+          ln = ln.replace(/^\*+\s*/, '').trim();
           ln = ln.replace(/^(?:\w+\s+)*(?:Name|Customer|Buyer|Party)\s*:?\s*/i, '').trim();
           if (ln && !/phone|mobile|gstin|gst|address|city|state|pin|invoice|date|contact/i.test(ln) && ln.length > 2) {
             buyer.name = clean(ln);
@@ -1026,7 +1051,8 @@ function parsePipeTable(fullText: string, lines: string[]): { items: any[]; tota
 }
 
 function parseMarkdownTable(text: string): FullExtraction {
-  const extraction = extractAll('');
+  const extraction = extractAll(text);
+  extraction.items = [];
   const lines = text.split('\n');
 
   let tableStart = -1;
@@ -1072,14 +1098,14 @@ function parseMarkdownTable(text: string): FullExtraction {
   const mappings: [string[], string][] = [
     [['item name', 'item_name', 'description'], 'name'],
     [['item_erp_id', 'erp id', 'erp'], 'erp'],
-    [['hsn code', 'hsn_code', 'hsn'], 'hsn'],
-    [['mrp', 'mrp_inr'], 'mrp'],
-    [['cases', 'standard_unit', 'std_unit'], 'cases'],
-    [['qty', 'quantity', 'invoice_delivery_qty', 'delivery_qty'], 'qty'],
-    [['ptr', 'price_std_inr', 'rate'], 'rate'],
-    [['taxable value', 'taxable_value', 'taxable'], 'taxable'],
-    [['gst amt', 'gst_amt', 'gst amount'], 'gstAmt'],
-    [['total value', 'total', 'grand_total'], 'total'],
+    [['hsn/sac', 'hsn_code', 'hsn', 'sac'], 'hsn'],
+    [['qty', 'quantity'], 'qty'],
+    [['price/unit', 'ptr', 'rate', 'price'], 'rate'],
+    [['unit'], 'unit'],
+    [['taxable', 'taxable value', 'taxable amt'], 'taxable'],
+    [['gst', 'gst rate/amt', 'gst_amt', 'gst amount', 'gst amt', 'total gst amount'], 'gstAmt'],
+    [['gst rate', 'gst%', 'gst_pct', 'gst rate/amt'], 'gstRate'],
+    [['amount', 'total', 'amount (₹)'], 'total'],
   ];
 
   for (let i = 0; i < headerLower.length; i++) {
@@ -1105,9 +1131,9 @@ function parseMarkdownTable(text: string): FullExtraction {
 
     if (cleanRow.length === 0) continue;
 
-    const firstCell = stripMarkdown(cleanRow[0] || '');
+    const firstNonEmptyCell = stripMarkdown(cleanRow.find(c => c.trim().length > 0) || '');
     const totalRowLabels = ['total', 'TOTAL'];
-    const isTotalRow = totalRowLabels.some(label => firstCell === label);
+    const isTotalRow = totalRowLabels.some(label => firstNonEmptyCell.toLowerCase() === label);
 
     if (isTotalRow && cleanRow.length >= 2) {
       if (colMap['total'] >= 0 && cleanRow[colMap['total']]) {
@@ -1150,6 +1176,8 @@ function parseMarkdownTable(text: string): FullExtraction {
     const total = colMap['total'] >= 0 ? num(stripMarkdown(row[colMap['total']] || '')) : 0;
     const gstRate = taxable > 0 && gstAmt > 0 ? Math.round((gstAmt / taxable) * 1000) / 10 : 5;
 
+    const derivedTaxable = taxable > 0 ? taxable : (total > 0 ? total - gstAmt : (qty > 0 && rate > 0 ? qty * rate : 0));
+
     extraction.items.push({
       sno: extraction.items.length + 1,
       erpId,
@@ -1161,12 +1189,12 @@ function parseMarkdownTable(text: string): FullExtraction {
       mrp: mrp || rate,
       rate,
       discount: 0,
-      taxable,
+      taxable: derivedTaxable,
       gstRate,
       cgst: 0,
       sgst: 0,
       gst: gstAmt,
-      total: total || (taxable + gstAmt),
+      total: total || (derivedTaxable + gstAmt),
     });
   }
 
