@@ -92,44 +92,51 @@ function parseItemsFromText(text: string): CsvItem[] {
     if (leadMatch) {
       const sno = parseInt(leadMatch[1], 10);
       const rest = leadMatch[3];
-      const tokens = rest.split(/\s+/);
       let description = '';
       const numericTokens: string[] = [];
       let foundFirstNum = false;
+      let hsn = '';
+      let startIdx = 0;
 
-      for (const tok of tokens) {
-        if (!foundFirstNum && /^[A-Za-z]/.test(tok)) {
-          description += (description ? ' ' : '') + tok;
-        } else {
-          foundFirstNum = true;
-          if (/^-?[\d,]+\.?\d*$/.test(tok)) {
-            numericTokens.push(tok);
+      // Rajshree invoice rows put the HSN before the numeric columns. Locate it
+      // explicitly so an 8-digit HSN is not mistaken for quantity.
+      const hsnMatch = rest.match(/(?:^|\s)(\d{4,8})(?=\s|$)/);
+      if (hsnMatch && hsnMatch.index !== undefined) {
+        const hsnStart = hsnMatch.index + (hsnMatch[0].length - hsnMatch[1].length);
+        hsn = hsnMatch[1];
+        description = clean(rest.slice(0, hsnStart));
+        numericTokens.push(hsn);
+        const numericColumns = rest.slice(hsnStart + hsn.length).replace(/\([^)]*\)/g, '');
+        numericTokens.push(...(numericColumns.match(/-?[\d,]+(?:\.\d+)?/g) || []));
+        startIdx = 1;
+      }
+
+      if (!hsn) {
+        for (const tok of rest.split(/\s+/)) {
+          if (!foundFirstNum && /^[A-Za-z]/.test(tok)) {
+            description += (description ? ' ' : '') + tok;
+          } else {
+            foundFirstNum = true;
+            if (/^-?[\d,]+\.?\d*$/.test(tok)) {
+              numericTokens.push(tok);
+            }
           }
         }
       }
 
       const n = numericTokens.map(t => num(t));
-      let hsn = '';
-      let startIdx = 0;
-
-      if (n.length >= 7) {
-        const firstStr = numericTokens[0];
-        if (/^\d{3,8}$/.test(firstStr) && n[0] < 100000) {
-          hsn = firstStr.padStart(4, '0');
-          startIdx = 1;
-        }
-      }
-
-      const totalVal = n.length > 0 ? n[n.length - 1] : 0;
-      const sgstVal = n.length > 1 ? n[n.length - 2] : 0;
-      const cgstVal = n.length > 2 ? n[n.length - 3] : 0;
-      const taxableVal = n.length > 3 ? n[n.length - 4] : 0;
-
-      const front = n.slice(startIdx, Math.max(startIdx, n.length - 4));
-      const qtyVal = front[0] || 0;
-      const mrpVal = front.length > 2 ? front[2] : 0;
-      let rateVal = front.length > 3 ? front[3] : 0;
-      const discVal = front.length > 4 ? front[4] : 0;
+      const front = n.slice(startIdx);
+      const rajshreeFormat = startIdx === 1 && front.length >= 11;
+      const qtyVal = rajshreeFormat ? front[3] : front[0] || 0;
+      const mrpVal = rajshreeFormat ? front[0] : (front.length > 2 ? front[2] : 0);
+      let rateVal = rajshreeFormat ? front[4] : (front.length > 3 ? front[3] : 0);
+      const discVal = rajshreeFormat ? front[6] : (front.length > 4 ? front[4] : 0);
+      const taxableVal = rajshreeFormat ? front[7] : (n.length > 3 ? n[n.length - 4] : 0);
+      const gstRateVal = rajshreeFormat ? front[8] : 0;
+      const gstVal = rajshreeFormat ? front[9] : (n.length > 2 ? n[n.length - 3] + n[n.length - 2] : 0);
+      const totalVal = rajshreeFormat ? front[10] : (n.length > 0 ? n[n.length - 1] : 0);
+      const cgstVal = rajshreeFormat ? gstVal / 2 : gstVal / 2;
+      const sgstVal = cgstVal;
 
       if (!rateVal && mrpVal > 0) rateVal = mrpVal;
 
@@ -144,7 +151,7 @@ function parseItemsFromText(text: string): CsvItem[] {
         rate: rateVal || mrpVal,
         discount: discVal,
         taxable: taxableVal,
-        gstRate: 0,
+        gstRate: gstRateVal || (taxableVal > 0 && gstVal > 0 ? Math.round((gstVal / taxableVal) * 1000) / 10 : 0),
         cgst: cgstVal,
         sgst: sgstVal,
         gst: cgstVal + sgstVal,
