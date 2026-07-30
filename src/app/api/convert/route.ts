@@ -39,10 +39,20 @@ export async function POST(request: NextRequest) {
     if (mode === 'ai') {
       const arrayBuffer = await file.arrayBuffer();
       const buffer = Buffer.from(arrayBuffer);
-      const text = await extractTextFromFile(buffer, ext);
+      let text: string;
+      try {
+        text = await extractTextFromFile(buffer, ext);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Text extraction failed';
+        return NextResponse.json({
+          error: `Could not extract text from ${ext.toUpperCase()} file: ${message}. Try Fast mode instead, or ensure the file is not password-protected or image-only.`,
+        }, { status: 422 });
+      }
 
       if (!text || text.trim().length === 0) {
-        return NextResponse.json({ error: 'Could not extract text from file. Try Fast mode or ensure the file contains readable text.' }, { status: 400 });
+        return NextResponse.json({
+          error: `The ${ext.toUpperCase()} file appears to be empty, image-only/scanned, or contains no readable text. Try Fast mode for direct parsing, or use a text-based ${ext.toUpperCase()} file.`,
+        }, { status: 422 });
       }
 
       const config = getDefaultConfig(aiProvider);

@@ -28,11 +28,52 @@ export async function POST(request: NextRequest) {
         const arrayBuffer = await file.arrayBuffer();
         const buffer = Buffer.from(arrayBuffer);
         const ext = file.name.split('.').pop()?.toLowerCase() || '';
-        text = await extractTextFromFile(buffer, ext);
+        try {
+          text = await extractTextFromFile(buffer, ext);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : 'Text extraction failed';
+          return NextResponse.json({
+            extracted: null,
+            validation: {
+              passed: [],
+              warnings: [message],
+              errors: [`Text extraction failed for "${file.name}": ${message}`],
+              score: 0,
+            },
+            recommendation: {
+              format: provider,
+              confidence: 0,
+              reason: `Could not read file: ${message}`,
+              tips: ['Try Fast/regex mode instead', 'Ensure file is not password-protected', 'Use text-based PDFs or Excel files'],
+            },
+            fileName: file.name,
+            fileSize: text.length,
+            aiError: message,
+            fallbackToRegex: true,
+          });
+        }
       }
 
       if (!text || text.trim().length === 0) {
-        return NextResponse.json({ error: 'No text or file provided' }, { status: 400 });
+        return NextResponse.json({
+          extracted: null,
+          validation: {
+            passed: [],
+            warnings: ['File appears to be empty or image-only'],
+            errors: [`Could not extract text from "${file?.name || 'file'}". It may be image-only/scanned, password-protected, or corrupted.`],
+            score: 0,
+          },
+          recommendation: {
+            format: provider,
+            confidence: 0,
+            reason: 'No readable text found in file',
+            tips: ['Try Fast/regex mode instead', 'Use OCR-enabled tools for scanned PDFs', 'Ensure file is not password-protected'],
+          },
+          fileName: file?.name || 'unknown',
+          fileSize: 0,
+          aiError: 'Empty or unreadable file',
+          fallbackToRegex: true,
+        });
       }
 
       const result = await extractWithProvider(text, {

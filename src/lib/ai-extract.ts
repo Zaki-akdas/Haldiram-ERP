@@ -193,7 +193,9 @@ export async function extractTextFromFile(buffer: Buffer, ext: string): Promise<
     } else {
       return buffer.toString('utf-8');
     }
-  } catch {
-    return '';
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('Text extraction failed:', ext, msg);
+    throw new Error(`Text extraction failed for .${ext}: ${msg}`);
   }
 }
