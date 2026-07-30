@@ -1,5 +1,11 @@
 import { getSupabaseAdmin } from '@/db';
 
+if (typeof DOMMatrix === 'undefined') {
+  (globalThis as any).DOMMatrix = class DOMMatrix {
+    constructor() {}
+  };
+}
+
 export const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
 export const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.2:3b';
 export const OLLAMA_TIMEOUT = parseInt(process.env.OLLAMA_TIMEOUT || '60000', 10);
@@ -179,16 +185,18 @@ async function extractWithPdf2Json(buffer: Buffer): Promise<string> {
   try {
     const PDFParser = require('pdf2json');
     return new Promise((resolve, reject) => {
-      const pdfParser = new PDFParser();
+      const parser = new PDFParser();
       let fullText = '';
+      const timeout = setTimeout(() => reject(new Error('pdf2json timeout')), 10000);
       
-      pdfParser.on('pdfParserDataError', (err: Error) => reject(err));
-      pdfParser.on('pdfParserDataReady', () => {
-        if (pdfParser.getRawTextContent) {
-          fullText = pdfParser.getRawTextContent();
+      parser.on('pdfParserDataError', (err: Error) => { clearTimeout(timeout); reject(err); });
+      parser.on('pdfParserDataReady', () => {
+        clearTimeout(timeout);
+        if (parser.getRawTextContent) {
+          fullText = parser.getRawTextContent();
         }
-        if (pdfParser.pages) {
-          fullText = pdfParser.pages.map((page: any) => {
+        if (parser.pages) {
+          fullText = parser.pages.map((page: any) => {
             if (page.text && Array.isArray(page.text)) {
               return page.text.map((t: any) => t.s || '').join(' ');
             }
@@ -198,7 +206,7 @@ async function extractWithPdf2Json(buffer: Buffer): Promise<string> {
         resolve(fullText || '');
       });
       
-      pdfParser.parseBuffer(buffer);
+      parser.parseBuffer(buffer);
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -208,9 +216,12 @@ async function extractWithPdf2Json(buffer: Buffer): Promise<string> {
 
 async function extractPdfText(buffer: Buffer): Promise<string> {
   try {
-    const pdfParse = require('pdf-parse');
-    const data = await pdfParse(buffer);
-    return data.text || '';
+    const mod = require('pdf-parse');
+    const PDFParse = mod.PDFParse || mod.default?.PDFParse;
+    if (!PDFParse) throw new Error('pdf-parse PDFParse not available');
+    const parser = new PDFParse(new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength));
+    const result = await parser.getText();
+    return result?.text || '';
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (message.includes('DOMMatrix') || message.includes('Cannot find module') || message.includes('canvas')) {

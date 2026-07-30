@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { getSupabaseAdmin } from '@/db';
 
+if (typeof DOMMatrix === 'undefined') {
+  (globalThis as any).DOMMatrix = class DOMMatrix {
+    constructor() {}
+  };
+}
+
 export const dynamic = 'force-dynamic';
 
 // ────────────────────── Types ──────────────────────
@@ -780,12 +786,41 @@ function validateExtraction(data: FullExtraction): ValidationResult {
 
 async function extractTextFromPDF(buffer: Buffer): Promise<string> {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const pdfParse = require('pdf-parse');
-    const data = await pdfParse(buffer);
-    return data.text || '';
+    const mod = require('pdf-parse');
+    const PDFParse = mod.PDFParse || mod.default?.PDFParse;
+    if (!PDFParse) throw new Error('pdf-parse PDFParse not available');
+    const parser = new PDFParse(new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength));
+    const result = await parser.getText();
+    return result?.text || '';
   } catch (err) {
-    console.error('PDF parse error:', err);
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes('DOMMatrix') || message.includes('Cannot find module') || message.includes('canvas')) {
+      console.warn('pdf-parse failed, falling back to pdf2json');
+      try {
+        const PDFParser = require('pdf2json');
+        return new Promise((resolve, reject) => {
+          const parser = new PDFParser();
+          let fullText = '';
+          const timeout = setTimeout(() => reject(new Error('pdf2json timeout')), 10000);
+          parser.on('pdfParserDataError', (e: Error) => { clearTimeout(timeout); reject(e); });
+          parser.on('pdfParserDataReady', () => {
+            clearTimeout(timeout);
+            if (parser.pages) {
+              fullText = parser.pages.map((page: any) => {
+                if (page.text && Array.isArray(page.text)) {
+                  return page.text.map((t: any) => t.s || '').join(' ');
+                }
+                return '';
+              }).join('\n');
+            }
+            resolve(fullText || '');
+          });
+          parser.parseBuffer(buffer);
+        });
+      } catch {
+        return '';
+      }
+    }
     return '';
   }
 }

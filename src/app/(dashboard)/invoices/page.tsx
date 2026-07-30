@@ -177,15 +177,13 @@ export default function InvoicesPage() {
         throw new Error(err.error || 'Conversion failed');
       }
 
-      const blob = await res.blob();
+      const data = await res.json();
+      const text = data.text || '';
+      const filename = data.filename || (targetFormat === 'csv' ? 'converted.csv' : 'converted.txt');
+      const blob = new Blob([text], { type: targetFormat === 'csv' ? 'text/csv;charset=utf-8' : 'text/plain;charset=utf-8' });
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      const disposition = res.headers.get('Content-Disposition');
-      let filename = targetFormat === 'csv' ? 'converted.csv' : 'converted.txt';
-      if (disposition && disposition.includes('filename=')) {
-        filename = disposition.split('filename=')[1].replace(/"/g, '');
-      }
       a.download = filename;
       document.body.appendChild(a);
       a.click();

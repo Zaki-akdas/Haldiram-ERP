@@ -1,28 +1,39 @@
 import * as XLSX from 'xlsx';
 
+if (typeof DOMMatrix === 'undefined') {
+  (globalThis as any).DOMMatrix = class DOMMatrix {
+    constructor() {}
+  };
+}
+
 async function getPdfParse() {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  return require('pdf-parse');
+  const mod = require('pdf-parse');
+  const PDFParse = mod.PDFParse || mod.default?.PDFParse;
+  if (!PDFParse) throw new Error('pdf-parse PDFParse not available');
+  return PDFParse;
 }
 
 async function extractPdfText(buffer: Buffer): Promise<string> {
   try {
-    const pdfParse = await getPdfParse();
-    const data = await pdfParse(buffer);
-    return data.text || '';
+    const PDFParse = await getPdfParse();
+    const parser = new PDFParse(new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength));
+    const result = await parser.getText();
+    return result?.text || '';
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    if (message.includes('DOMMatrix') || message.includes('canvas')) {
+    if (message.includes('DOMMatrix') || message.includes('canvas') || message.includes('Uint8Array')) {
       console.warn('pdf-parse failed, falling back to pdf2json');
       try {
-        const PDFParser = require('pdf2json');
+        const pdf2json = require('pdf2json');
         return new Promise((resolve, reject) => {
-          const pdfParser = new PDFParser();
+          const parser = new pdf2json();
           let fullText = '';
-          pdfParser.on('pdfParserDataError', (e: Error) => reject(e));
-          pdfParser.on('pdfParserDataReady', () => {
-            if (pdfParser.pages) {
-              fullText = pdfParser.pages.map((page: any) => {
+          const timeout = setTimeout(() => reject(new Error('pdf2json timeout')), 10000);
+          parser.on('pdfParserDataError', (e: Error) => { clearTimeout(timeout); reject(e); });
+          parser.on('pdfParserDataReady', () => {
+            clearTimeout(timeout);
+            if (parser.pages) {
+              fullText = parser.pages.map((page: any) => {
                 if (page.text && Array.isArray(page.text)) {
                   return page.text.map((t: any) => t.s || '').join(' ');
                 }
@@ -31,7 +42,7 @@ async function extractPdfText(buffer: Buffer): Promise<string> {
             }
             resolve(fullText || '');
           });
-          pdfParser.parseBuffer(buffer);
+          parser.parseBuffer(buffer);
         });
       } catch {
         return '';
