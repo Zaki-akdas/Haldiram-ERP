@@ -96,7 +96,7 @@ export async function POST(request: NextRequest) {
         }
 
         const csv = [headers.join(','), ...rows.map((r: any[]) => r.join(','))].join('\n');
-        const providerLabel = selectedProvider === 'gemini' ? 'Gemini' : selectedProvider === 'azure' ? 'Azure OpenAI' : 'Ollama';
+        const providerLabel = selectedProvider === 'gemini' ? 'Gemini' : selectedProvider === 'azure' ? 'Azure OpenAI' : selectedProvider === 'bazaarlink' ? 'BazaarLink' : 'Ollama';
         const finalCsv = `# AI ${providerLabel} Extracted from: ${file.name}\n# Confidence: ${confidence}%\n# Seller: ${extracted.seller.name || 'N/A'}\n# Buyer: ${extracted.buyer.name || 'N/A'}\n\n${csv}`;
 
         return NextResponse.json({
@@ -106,7 +106,7 @@ export async function POST(request: NextRequest) {
         });
       } else {
         let text = `# Converted from: ${file.name}\n`;
-        const providerLabel = selectedProvider === 'gemini' ? 'Google Gemini' : selectedProvider === 'azure' ? 'Azure OpenAI' : 'Local Ollama';
+        const providerLabel = selectedProvider === 'gemini' ? 'Google Gemini' : selectedProvider === 'azure' ? 'Azure OpenAI' : selectedProvider === 'bazaarlink' ? 'BazaarLink' : 'Local Ollama';
         text += `# AI Provider: ${providerLabel}\n`;
         text += `# Date: ${new Date().toLocaleDateString('en-IN')}\n`;
         text += `# Confidence: ${confidence}%\n\n`;

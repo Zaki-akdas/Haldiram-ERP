@@ -41,7 +41,7 @@ export async function extractWithProvider(text: string, config: AIConfig): Promi
       };
     }
     case 'bazaarlink': {
-      const result = await callBazaarLink(truncated, config.model, config.maxTokens || 60000);
+      const result = await callBazaarLink(truncated, config.model, 60000);
       if (result.error || !result.raw) return result;
       return {
         ...result,
