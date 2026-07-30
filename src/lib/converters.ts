@@ -12,8 +12,10 @@ async function extractPdfText(buffer: Buffer): Promise<string> {
   try {
     const tmp = path.join(os.tmpdir(), `pdf-${Date.now()}.pdf`);
     require('fs').writeFileSync(tmp, buffer);
+    const nodeModulesPath = path.join(process.cwd(), 'node_modules');
     const { stdout } = await execFileAsync('node', [PDF_EXTRACT_SCRIPT, tmp], {
-      env: { ...process.env, FORCE_COLOR: '0' },
+      cwd: process.cwd(),
+      env: { ...process.env, FORCE_COLOR: '0', NODE_PATH: nodeModulesPath },
       timeout: 30000,
     });
     return stdout || '';
