@@ -175,12 +175,56 @@ export function computeConfidence(data: any): number {
   return Math.min(score, 100);
 }
 
+async function extractWithPdf2Json(buffer: Buffer): Promise<string> {
+  try {
+    const PDFParser = require('pdf2json');
+    return new Promise((resolve, reject) => {
+      const pdfParser = new PDFParser();
+      let fullText = '';
+      
+      pdfParser.on('pdfParserDataError', (err: Error) => reject(err));
+      pdfParser.on('pdfParserDataReady', () => {
+        if (pdfParser.getRawTextContent) {
+          fullText = pdfParser.getRawTextContent();
+        }
+        if (pdfParser.pages) {
+          fullText = pdfParser.pages.map((page: any) => {
+            if (page.text && Array.isArray(page.text)) {
+              return page.text.map((t: any) => t.s || '').join(' ');
+            }
+            return '';
+          }).join('\n');
+        }
+        resolve(fullText || '');
+      });
+      
+      pdfParser.parseBuffer(buffer);
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`PDF extraction failed with pdf2json fallback: ${message}`);
+  }
+}
+
+async function extractPdfText(buffer: Buffer): Promise<string> {
+  try {
+    const pdfParse = require('pdf-parse');
+    const data = await pdfParse(buffer);
+    return data.text || '';
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes('DOMMatrix') || message.includes('Cannot find module') || message.includes('canvas')) {
+      console.warn('pdf-parse failed due to missing DOM/canvas, falling back to pdf2json');
+      return await extractWithPdf2Json(buffer);
+    }
+    throw err;
+  }
+}
+
 export async function extractTextFromFile(buffer: Buffer, ext: string): Promise<string> {
   try {
     if (ext === 'pdf') {
-      const pdfParse = require('pdf-parse');
-      const data = await pdfParse(buffer);
-      return data.text || '';
+      return await extractPdfText(buffer);
     } else if (ext === 'xlsx' || ext === 'xls') {
       const XLSX = require('xlsx');
       const workbook = XLSX.read(buffer, { type: 'buffer' });
@@ -194,8 +238,8 @@ export async function extractTextFromFile(buffer: Buffer, ext: string): Promise<
       return buffer.toString('utf-8');
     }
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error('Text extraction failed:', ext, msg);
-    throw new Error(`Text extraction failed for .${ext}: ${msg}`);
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('Text extraction failed:', ext, message);
+    throw new Error(`Text extraction failed for .${ext}: ${message}`);
   }
 }
