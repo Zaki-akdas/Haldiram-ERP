@@ -2,6 +2,7 @@ import * as XLSX from 'xlsx';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
+import os from 'os';
 
 const execFileAsync = promisify(execFile);
 
@@ -9,8 +10,7 @@ const PDF_EXTRACT_SCRIPT = path.join(process.cwd(), 'scripts', 'pdf-extract.mjs'
 
 async function extractPdfText(buffer: Buffer): Promise<string> {
   try {
-    const tmp = path.join(process.cwd(), 'tmp', `pdf-${Date.now()}.pdf`);
-    require('fs').mkdirSync(path.dirname(tmp), { recursive: true });
+    const tmp = path.join(os.tmpdir(), `pdf-${Date.now()}.pdf`);
     require('fs').writeFileSync(tmp, buffer);
     const { stdout } = await execFileAsync('node', [PDF_EXTRACT_SCRIPT, tmp], {
       env: { ...process.env, FORCE_COLOR: '0' },

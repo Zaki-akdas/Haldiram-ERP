@@ -789,9 +789,9 @@ async function extractTextFromPDF(buffer: Buffer): Promise<string> {
     const { execFile } = await import('node:child_process');
     const { promisify } = await import('node:util');
     const path = await import('node:path');
+    const os = await import('node:os');
     const execFileAsync = promisify(execFile);
-    const tmp = path.join(process.cwd(), 'tmp', `pdf-${Date.now()}.pdf`);
-    require('fs').mkdirSync(path.dirname(tmp), { recursive: true });
+    const tmp = path.join(os.tmpdir(), `pdf-${Date.now()}.pdf`);
     require('fs').writeFileSync(tmp, buffer);
     const { stdout } = await execFileAsync('node', [path.join(process.cwd(), 'scripts', 'pdf-extract.mjs'), tmp], {
       env: { ...process.env, FORCE_COLOR: '0' },
