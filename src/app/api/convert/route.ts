@@ -6,6 +6,25 @@ import { AIProvider, getDefaultConfig, extractWithProvider } from '@/lib/ai-serv
 
 export const dynamic = 'force-dynamic';
 
+async function convertFast(buffer: Buffer, ext: string, targetFormat: string): Promise<{ text: string; extension: string }> {
+  if (ext === 'pdf') {
+    return targetFormat === 'csv'
+      ? { text: await pdfToCsv(buffer), extension: 'csv' }
+      : { text: await pdfToCopyPaste(buffer), extension: 'txt' };
+  }
+  if (ext === 'xlsx' || ext === 'xls') {
+    return targetFormat === 'csv'
+      ? { text: await excelToCsv(buffer), extension: 'csv' }
+      : { text: await excelToCopyPaste(buffer), extension: 'txt' };
+  }
+  if (ext === 'csv') {
+    return targetFormat === 'csv'
+      ? { text: buffer.toString('utf8'), extension: 'csv' }
+      : { text: await csvToCopyPaste(buffer), extension: 'txt' };
+  }
+  throw new Error(`Unsupported input format: .${ext}`);
+}
+
 export async function POST(request: NextRequest) {
   try {
     const user = await getCurrentUser();
@@ -60,10 +79,15 @@ export async function POST(request: NextRequest) {
 
       if (!result.normalized || !result.normalized.items || result.normalized.items.length === 0) {
         const errorMsg = result.error || 'AI extraction returned no items';
+        const fallback = await convertFast(buffer, ext, targetFormat);
+        const baseName = file.name.replace(/\.[^/.]+$/, '');
         return NextResponse.json({
-          error: `${errorMsg}. Try Fast mode instead.`,
-          tip: 'Fast mode uses direct parsing and works without AI providers.',
-        }, { status: 422 });
+          text: fallback.text,
+          filename: `${baseName}_${targetFormat === 'csv' ? 'csv' : 'copy-paste'}.${fallback.extension}`,
+          format: targetFormat,
+          aiFallback: true,
+          warning: `AI provider unavailable: ${errorMsg}. Returned verified Fast-mode output instead.`,
+        });
       }
 
       const selectedProvider = aiProvider;
@@ -157,36 +181,7 @@ export async function POST(request: NextRequest) {
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
-    let convertedText: string;
-    let extension: string;
-
-    if (ext === 'pdf') {
-      if (targetFormat === 'csv') {
-        convertedText = await pdfToCsv(buffer);
-        extension = 'csv';
-      } else {
-        convertedText = await pdfToCopyPaste(buffer);
-        extension = 'txt';
-      }
-    } else if (ext === 'xlsx' || ext === 'xls') {
-      if (targetFormat === 'csv') {
-        convertedText = await excelToCsv(buffer);
-        extension = 'csv';
-      } else {
-        convertedText = await excelToCopyPaste(buffer);
-        extension = 'txt';
-      }
-    } else if (ext === 'csv') {
-      if (targetFormat === 'csv') {
-        convertedText = await file.text();
-        extension = 'csv';
-      } else {
-        convertedText = await csvToCopyPaste(buffer);
-        extension = 'txt';
-      }
-    } else {
-      return NextResponse.json({ error: `Unsupported input format: .${ext}` }, { status: 400 });
-    }
+    const { text: convertedText, extension } = await convertFast(buffer, ext, targetFormat);
 
     const baseName = file.name.replace(/\.[^/.]+$/, '');
     const downloadName = `${baseName}_${targetFormat === 'csv' ? 'csv' : 'copy-paste'}.${extension}`;

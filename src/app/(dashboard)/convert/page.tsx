@@ -91,7 +91,7 @@ export default function ConvertPage() {
 
       if (mode === 'ai') {
         const providerLabel = provider === 'ollama' ? 'Local Ollama' : provider === 'gemini' ? 'Google Gemini' : provider === 'azure' ? 'Azure OpenAI' : 'BazaarLink';
-        setWarning(`AI mode used ${providerLabel}. If results are poor, try Fast mode or switch provider.`);
+        setWarning(data.warning || `AI mode used ${providerLabel}. If results are poor, try Fast mode or switch provider.`);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Conversion failed');

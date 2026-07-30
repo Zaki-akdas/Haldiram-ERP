@@ -19,7 +19,7 @@ export function getDefaultConfig(provider: AIProvider): AIConfig {
     case 'ollama':
       return {
         provider: 'ollama',
-        model: process.env.OLLAMA_MODEL || 'llama3.2:3b',
+        model: process.env.OLLAMA_MODEL || 'llama3:latest',
         temperature: 0.1,
         maxTokens: 4096,
       };
