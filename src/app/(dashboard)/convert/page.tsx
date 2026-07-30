@@ -20,10 +20,11 @@ export default function ConvertPage() {
   const [error, setError] = useState('');
   const [progress, setProgress] = useState(0);
   const [warning, setWarning] = useState('');
+  const [downloadName, setDownloadName] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
 
   const reset = () => {
-    setFile(null); setPreview(null); setError(''); setWarning(''); setProgress(0);
+    setFile(null); setPreview(null); setError(''); setWarning(''); setProgress(0); setDownloadName('');
     if (fileRef.current) fileRef.current.value = '';
   };
 
@@ -83,8 +84,10 @@ export default function ConvertPage() {
         throw new Error(err.error || `Conversion failed (${res.status})`);
       }
 
-      const text = await res.text();
-      setPreview(text);
+      const data = await res.json();
+      const convertedText = data.text || '';
+      setPreview(convertedText);
+      setDownloadName(data.filename || '');
 
       if (mode === 'ai') {
         const providerLabel = provider === 'ollama' ? 'Local Ollama' : provider === 'gemini' ? 'Google Gemini' : 'Azure OpenAI';
@@ -106,7 +109,8 @@ export default function ConvertPage() {
     const a = document.createElement('a');
     a.href = url;
     const ext = outputType === 'csv' ? 'csv' : 'txt';
-    a.download = file ? `${file.name.replace(/\.[^/.]+$/, '')}_converted.${ext}` : `converted.${ext}`;
+    const name = downloadName || (file ? `${file.name.replace(/\.[^/.]+$/, '')}_converted.${ext}` : `converted.${ext}`);
+    a.download = name;
     document.body.appendChild(a);
     a.click();
     a.remove();

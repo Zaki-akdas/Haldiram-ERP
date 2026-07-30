@@ -5,6 +5,42 @@ async function getPdfParse() {
   return require('pdf-parse');
 }
 
+async function extractPdfText(buffer: Buffer): Promise<string> {
+  try {
+    const pdfParse = await getPdfParse();
+    const data = await pdfParse(buffer);
+    return data.text || '';
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes('DOMMatrix') || message.includes('canvas')) {
+      console.warn('pdf-parse failed, falling back to pdf2json');
+      try {
+        const PDFParser = require('pdf2json');
+        return new Promise((resolve, reject) => {
+          const pdfParser = new PDFParser();
+          let fullText = '';
+          pdfParser.on('pdfParserDataError', (e: Error) => reject(e));
+          pdfParser.on('pdfParserDataReady', () => {
+            if (pdfParser.pages) {
+              fullText = pdfParser.pages.map((page: any) => {
+                if (page.text && Array.isArray(page.text)) {
+                  return page.text.map((t: any) => t.s || '').join(' ');
+                }
+                return '';
+              }).join('\n');
+            }
+            resolve(fullText || '');
+          });
+          pdfParser.parseBuffer(buffer);
+        });
+      } catch {
+        return '';
+      }
+    }
+    return '';
+  }
+}
+
 // ────────────────────── Types ──────────────────────
 
 interface CsvItem {
@@ -161,9 +197,7 @@ function escapeCsv(val: string): string {
 
 export async function pdfToCsv(buffer: Buffer): Promise<string> {
   try {
-    const pdfParse = await getPdfParse();
-    const data = await pdfParse(buffer);
-    const text = data.text || '';
+    const text = await extractPdfText(buffer);
     const items = parseItemsFromText(text);
 
     if (items.length === 0) {
@@ -269,9 +303,7 @@ export async function excelToCopyPaste(buffer: Buffer): Promise<string> {
 
 export async function pdfToCopyPaste(buffer: Buffer): Promise<string> {
   try {
-    const pdfParse = await getPdfParse();
-    const data = await pdfParse(buffer);
-    const text = data.text || '';
+    const text = await extractPdfText(buffer);
     const items = parseItemsFromText(text);
 
     const lines: string[] = [];

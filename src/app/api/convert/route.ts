@@ -99,12 +99,10 @@ export async function POST(request: NextRequest) {
         const providerLabel = selectedProvider === 'gemini' ? 'Gemini' : selectedProvider === 'azure' ? 'Azure OpenAI' : 'Ollama';
         const finalCsv = `# AI ${providerLabel} Extracted from: ${file.name}\n# Confidence: ${confidence}%\n# Seller: ${extracted.seller.name || 'N/A'}\n# Buyer: ${extracted.buyer.name || 'N/A'}\n\n${csv}`;
 
-        return new NextResponse(finalCsv, {
-          status: 200,
-          headers: {
-            'Content-Type': 'text/csv;charset=utf-8',
-            'Content-Disposition': `attachment; filename="${file.name.replace(/\.[^/.]+$/, '')}_ai_${selectedProvider}.csv"`,
-          },
+        return NextResponse.json({
+          text: finalCsv,
+          filename: `${file.name.replace(/\.[^/.]+$/, '')}_ai_${selectedProvider}.csv`,
+          format: 'csv',
         });
       } else {
         let text = `# Converted from: ${file.name}\n`;
@@ -147,12 +145,10 @@ export async function POST(request: NextRequest) {
           text += `Grand Total: ${extracted.totals.grandTotal || 0}\n`;
         }
 
-        return new NextResponse(text, {
-          status: 200,
-          headers: {
-            'Content-Type': 'text/plain;charset=utf-8',
-            'Content-Disposition': `attachment; filename="${file.name.replace(/\.[^/.]+$/, '')}_ai_${selectedProvider}_copy-paste.txt"`,
-          },
+        return NextResponse.json({
+          text: text,
+          filename: `${file.name.replace(/\.[^/.]+$/, '')}_ai_${selectedProvider}_copy-paste.txt`,
+          format: 'copy-paste',
         });
       }
     }
@@ -162,37 +158,30 @@ export async function POST(request: NextRequest) {
     const buffer = Buffer.from(arrayBuffer);
 
     let convertedText: string;
-    let contentType: string;
     let extension: string;
 
     if (ext === 'pdf') {
       if (targetFormat === 'csv') {
         convertedText = await pdfToCsv(buffer);
-        contentType = 'text/csv';
         extension = 'csv';
       } else {
         convertedText = await pdfToCopyPaste(buffer);
-        contentType = 'text/plain';
         extension = 'txt';
       }
     } else if (ext === 'xlsx' || ext === 'xls') {
       if (targetFormat === 'csv') {
         convertedText = await excelToCsv(buffer);
-        contentType = 'text/csv';
         extension = 'csv';
       } else {
         convertedText = await excelToCopyPaste(buffer);
-        contentType = 'text/plain';
         extension = 'txt';
       }
     } else if (ext === 'csv') {
       if (targetFormat === 'csv') {
         convertedText = await file.text();
-        contentType = 'text/csv';
         extension = 'csv';
       } else {
         convertedText = await excelToCopyPaste(buffer);
-        contentType = 'text/plain';
         extension = 'txt';
       }
     } else {
@@ -202,12 +191,10 @@ export async function POST(request: NextRequest) {
     const baseName = file.name.replace(/\.[^/.]+$/, '');
     const downloadName = `${baseName}_${targetFormat === 'csv' ? 'csv' : 'copy-paste'}.${extension}`;
 
-    return new NextResponse(convertedText, {
-      status: 200,
-      headers: {
-        'Content-Type': contentType,
-        'Content-Disposition': `attachment; filename="${downloadName}"`,
-      },
+    return NextResponse.json({
+      text: convertedText,
+      filename: downloadName,
+      format: targetFormat,
     });
   } catch (error) {
     console.error('Conversion error:', error);
