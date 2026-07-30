@@ -61,7 +61,7 @@ ${text}`;
         'Authorization': `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: model || process.env.AI_MODEL || 'llama3.2:3b',
+        model: model || process.env.AI_MODEL || 'glm-4.7',
         messages: [
           { role: 'system', content: 'You are an expert invoice data extractor.' },
           { role: 'user', content: systemPrompt },

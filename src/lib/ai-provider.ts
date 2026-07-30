@@ -40,7 +40,7 @@ export function getDefaultConfig(provider: AIProvider): AIConfig {
     case 'bazaarlink':
       return {
         provider: 'bazaarlink',
-        model: process.env.AI_MODEL || 'llama3.2:3b',
+        model: process.env.AI_MODEL || 'glm-4.7',
         temperature: 0.1,
         maxTokens: 4096,
       };
