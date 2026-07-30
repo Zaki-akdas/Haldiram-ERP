@@ -786,42 +786,22 @@ function validateExtraction(data: FullExtraction): ValidationResult {
 
 async function extractTextFromPDF(buffer: Buffer): Promise<string> {
   try {
-    const mod = require('pdf-parse');
-    const PDFParse = mod.PDFParse || mod.default?.PDFParse;
-    if (!PDFParse) throw new Error('pdf-parse PDFParse not available');
-    const parser = new PDFParse(new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength));
-    const result = await parser.getText();
-    return result?.text || '';
+    const { execFile } = await import('node:child_process');
+    const { promisify } = await import('node:util');
+    const path = await import('node:path');
+    const execFileAsync = promisify(execFile);
+    const tmp = path.join(process.cwd(), 'tmp', `pdf-${Date.now()}.pdf`);
+    require('fs').mkdirSync(path.dirname(tmp), { recursive: true });
+    require('fs').writeFileSync(tmp, buffer);
+    const { stdout } = await execFileAsync('node', [path.join(process.cwd(), 'scripts', 'pdf-extract.mjs'), tmp], {
+      env: { ...process.env, FORCE_COLOR: '0' },
+      timeout: 30000,
+    });
+    return stdout || '';
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    if (message.includes('DOMMatrix') || message.includes('Cannot find module') || message.includes('canvas')) {
-      console.warn('pdf-parse failed, falling back to pdf2json');
-      try {
-        const PDFParser = require('pdf2json');
-        return new Promise((resolve, reject) => {
-          const parser = new PDFParser();
-          let fullText = '';
-          const timeout = setTimeout(() => reject(new Error('pdf2json timeout')), 10000);
-          parser.on('pdfParserDataError', (e: Error) => { clearTimeout(timeout); reject(e); });
-          parser.on('pdfParserDataReady', () => {
-            clearTimeout(timeout);
-            if (parser.pages) {
-              fullText = parser.pages.map((page: any) => {
-                if (page.text && Array.isArray(page.text)) {
-                  return page.text.map((t: any) => t.s || '').join(' ');
-                }
-                return '';
-              }).join('\n');
-            }
-            resolve(fullText || '');
-          });
-          parser.parseBuffer(buffer);
-        });
-      } catch {
-        return '';
-      }
-    }
-    return '';
+    console.error('PDF extraction error:', message);
+    throw new Error(`Text extraction failed for .pdf: ${message}`);
   }
 }
 

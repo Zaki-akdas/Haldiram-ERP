@@ -1,4 +1,7 @@
 import { getSupabaseAdmin } from '@/db';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+import path from 'path';
 
 if (typeof DOMMatrix === 'undefined') {
   (globalThis as any).DOMMatrix = class DOMMatrix {
@@ -6,6 +9,26 @@ if (typeof DOMMatrix === 'undefined') {
   };
 }
 
+const execFileAsync = promisify(execFile);
+
+const PDF_EXTRACT_SCRIPT = path.join(process.cwd(), 'scripts', 'pdf-extract.mjs');
+
+async function extractPdfText(buffer: Buffer): Promise<string> {
+  try {
+    const tmp = path.join(process.cwd(), 'tmp', `pdf-${Date.now()}.pdf`);
+    require('fs').mkdirSync(path.dirname(tmp), { recursive: true });
+    require('fs').writeFileSync(tmp, buffer);
+    const { stdout } = await execFileAsync('node', [PDF_EXTRACT_SCRIPT, tmp], {
+      env: { ...process.env, FORCE_COLOR: '0' },
+      timeout: 30000,
+    });
+    return stdout || '';
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('PDF extraction error:', message);
+    throw new Error(`Text extraction failed for .pdf: ${message}`);
+  }
+}
 export const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
 export const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.2:3b';
 export const OLLAMA_TIMEOUT = parseInt(process.env.OLLAMA_TIMEOUT || '60000', 10);
@@ -179,57 +202,6 @@ export function computeConfidence(data: any): number {
   if (data.totals.grandTotal > 0) score += 10;
   if (data.totals.taxableAmount > 0) score += 5;
   return Math.min(score, 100);
-}
-
-async function extractWithPdf2Json(buffer: Buffer): Promise<string> {
-  try {
-    const PDFParser = require('pdf2json');
-    return new Promise((resolve, reject) => {
-      const parser = new PDFParser();
-      let fullText = '';
-      const timeout = setTimeout(() => reject(new Error('pdf2json timeout')), 10000);
-      
-      parser.on('pdfParserDataError', (err: Error) => { clearTimeout(timeout); reject(err); });
-      parser.on('pdfParserDataReady', () => {
-        clearTimeout(timeout);
-        if (parser.getRawTextContent) {
-          fullText = parser.getRawTextContent();
-        }
-        if (parser.pages) {
-          fullText = parser.pages.map((page: any) => {
-            if (page.text && Array.isArray(page.text)) {
-              return page.text.map((t: any) => t.s || '').join(' ');
-            }
-            return '';
-          }).join('\n');
-        }
-        resolve(fullText || '');
-      });
-      
-      parser.parseBuffer(buffer);
-    });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    throw new Error(`PDF extraction failed with pdf2json fallback: ${message}`);
-  }
-}
-
-async function extractPdfText(buffer: Buffer): Promise<string> {
-  try {
-    const mod = require('pdf-parse');
-    const PDFParse = mod.PDFParse || mod.default?.PDFParse;
-    if (!PDFParse) throw new Error('pdf-parse PDFParse not available');
-    const parser = new PDFParse(new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength));
-    const result = await parser.getText();
-    return result?.text || '';
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    if (message.includes('DOMMatrix') || message.includes('Cannot find module') || message.includes('canvas')) {
-      console.warn('pdf-parse failed due to missing DOM/canvas, falling back to pdf2json');
-      return await extractWithPdf2Json(buffer);
-    }
-    throw err;
-  }
 }
 
 export async function extractTextFromFile(buffer: Buffer, ext: string): Promise<string> {

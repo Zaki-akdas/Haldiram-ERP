@@ -37,4 +37,7 @@ Thumbs.db
 # Supabase
 supabase
 
+# Temporary files
+tmp
+
 .vercel

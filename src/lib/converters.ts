@@ -1,56 +1,29 @@
 import * as XLSX from 'xlsx';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+import path from 'path';
 
-if (typeof DOMMatrix === 'undefined') {
-  (globalThis as any).DOMMatrix = class DOMMatrix {
-    constructor() {}
-  };
-}
+const execFileAsync = promisify(execFile);
 
-async function getPdfParse() {
-  const mod = require('pdf-parse');
-  const PDFParse = mod.PDFParse || mod.default?.PDFParse;
-  if (!PDFParse) throw new Error('pdf-parse PDFParse not available');
-  return PDFParse;
-}
+const PDF_EXTRACT_SCRIPT = path.join(process.cwd(), 'scripts', 'pdf-extract.mjs');
 
 async function extractPdfText(buffer: Buffer): Promise<string> {
   try {
-    const PDFParse = await getPdfParse();
-    const parser = new PDFParse(new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength));
-    const result = await parser.getText();
-    return result?.text || '';
+    const tmp = path.join(process.cwd(), 'tmp', `pdf-${Date.now()}.pdf`);
+    require('fs').mkdirSync(path.dirname(tmp), { recursive: true });
+    require('fs').writeFileSync(tmp, buffer);
+    const { stdout } = await execFileAsync('node', [PDF_EXTRACT_SCRIPT, tmp], {
+      env: { ...process.env, FORCE_COLOR: '0' },
+      timeout: 30000,
+    });
+    return stdout || '';
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    if (message.includes('DOMMatrix') || message.includes('canvas') || message.includes('Uint8Array')) {
-      console.warn('pdf-parse failed, falling back to pdf2json');
-      try {
-        const pdf2json = require('pdf2json');
-        return new Promise((resolve, reject) => {
-          const parser = new pdf2json();
-          let fullText = '';
-          const timeout = setTimeout(() => reject(new Error('pdf2json timeout')), 10000);
-          parser.on('pdfParserDataError', (e: Error) => { clearTimeout(timeout); reject(e); });
-          parser.on('pdfParserDataReady', () => {
-            clearTimeout(timeout);
-            if (parser.pages) {
-              fullText = parser.pages.map((page: any) => {
-                if (page.text && Array.isArray(page.text)) {
-                  return page.text.map((t: any) => t.s || '').join(' ');
-                }
-                return '';
-              }).join('\n');
-            }
-            resolve(fullText || '');
-          });
-          parser.parseBuffer(buffer);
-        });
-      } catch {
-        return '';
-      }
-    }
+    console.error('PDF extraction error:', message);
     return '';
   }
 }
+
 
 // ────────────────────── Types ──────────────────────
 
@@ -91,6 +64,25 @@ function parseItemsFromText(text: string): CsvItem[] {
   const items: CsvItem[] = [];
 
   for (const line of lines) {
+    if (line.startsWith('|')) {
+      const cells = line.split('|').map(c => c.trim()).filter(c => c && !/^-+$/.test(c));
+      if (cells.length < 3) continue;
+      const snoStr = cells[0].replace(/^#\s*/, '').trim();
+      const sno = parseInt(snoStr, 10);
+      if (!sno || sno > 500) continue;
+      const hsn = cells[2] || '';
+      const nums = cells.slice(3).map(c => num(c.replace(/,/g, '')));
+      const qty = nums[0] || 0;
+      const mrp = nums[1] || 0;
+      const cases = nums[2] || 0;
+      const taxable = nums[3] || 0;
+      const gstAmt = nums[4] || 0;
+      const total = nums[5] || 0;
+      const description = cells[1] || '';
+      items.push({ sno, description, hsn, quantity: qty, freeQty: 0, unit: 'PCS', mrp, rate: mrp || qty, discount: 0, taxable, gstRate: taxable > 0 ? Math.round((gstAmt / taxable) * 100 * 10) / 10 : 0, cgst: gstAmt / 2, sgst: gstAmt / 2, gst: gstAmt, total });
+      continue;
+    }
+
     const leadMatch = line.match(/^(\d{1,3})\s+([A-Z]{1,2}\d{12,20}[A-Z]?)\s+(.+)/);
     if (leadMatch) {
       const sno = parseInt(leadMatch[1], 10);
