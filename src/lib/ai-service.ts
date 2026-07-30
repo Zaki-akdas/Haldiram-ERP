@@ -1,6 +1,7 @@
 import { callOllama } from './ai-providers/ollama';
 import { callGemini } from './ai-providers/gemini';
 import { callAzureOpenAI } from './ai-providers/azure';
+import { callBazaarLink } from './ai-providers/bazaarlink';
 import { computeConfidence, normalizeExtraction } from './ai-extract';
 import type { AIProvider, AIConfig, AIExtractionResult } from './ai-provider';
 import { getDefaultConfig } from './ai-provider';
@@ -32,6 +33,15 @@ export async function extractWithProvider(text: string, config: AIConfig): Promi
     }
     case 'azure': {
       const result = await callAzureOpenAI(truncated, config.model, config.maxTokens);
+      if (result.error || !result.raw) return result;
+      return {
+        ...result,
+        normalized: normalizeExtraction(result.raw),
+        confidence: computeConfidence(normalizeExtraction(result.raw)),
+      };
+    }
+    case 'bazaarlink': {
+      const result = await callBazaarLink(truncated, config.model, config.maxTokens || 60000);
       if (result.error || !result.raw) return result;
       return {
         ...result,

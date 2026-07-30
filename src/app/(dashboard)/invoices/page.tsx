@@ -58,7 +58,7 @@ export default function InvoicesPage() {
   const [importing, setImporting] = useState(false);
   const [invoiceId, setInvoiceId] = useState<number | null>(null);
   const [mode, setMode] = useState<'regex' | 'ai'>('regex');
-  const [provider, setProvider] = useState<'ollama' | 'gemini' | 'azure'>('ollama');
+  const [provider, setProvider] = useState<'ollama' | 'gemini' | 'azure' | 'bazaarlink'>('bazaarlink');
   const [downloading, setDownloading] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState(false);
   const [customerNameInput, setCustomerNameInput] = useState('');
@@ -66,7 +66,7 @@ export default function InvoicesPage() {
   const abortRef = useRef<AbortController | null>(null);
 
   const reset = () => {
-    setFile(null); setExtracted(null); setValidation(null); setRecommendation(null); setError(''); setInvoiceId(null); setMode('regex'); setProvider('ollama'); setDownloading(false); setEditingCustomer(false); setCustomerNameInput('');
+    setFile(null); setExtracted(null); setValidation(null); setRecommendation(null); setError(''); setInvoiceId(null); setMode('regex'); setProvider('bazaarlink'); setDownloading(false); setEditingCustomer(false); setCustomerNameInput('');
     if (fileRef.current) fileRef.current.value = '';
   };
 
@@ -340,12 +340,13 @@ export default function InvoicesPage() {
         </div>
         {mode === 'ai' && (
           <div className="px-5 py-2 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-700/30">
-            <label className="text-[10px] font-bold text-slate-400 uppercase mr-2">Provider</label>
-            <select value={provider} onChange={e => setProvider(e.target.value as any)} className="text-xs border border-slate-300 dark:border-slate-600 rounded px-2 py-1 bg-white dark:bg-slate-800 text-slate-800 dark:text-white">
-              <option value="ollama">Ollama</option>
-              <option value="gemini">Gemini</option>
-              <option value="azure">Azure OpenAI</option>
-            </select>
+             <label className="text-[10px] font-bold text-slate-400 uppercase mr-2">Provider</label>
+             <select value={provider} onChange={e => setProvider(e.target.value as any)} className="text-xs border border-slate-300 dark:border-slate-600 rounded px-2 py-1 bg-white dark:bg-slate-800 text-slate-800 dark:text-white">
+               <option value="ollama">Ollama</option>
+               <option value="gemini">Gemini</option>
+               <option value="azure">Azure OpenAI</option>
+               <option value="bazaarlink">BazaarLink</option>
+             </select>
           </div>
         )}
 

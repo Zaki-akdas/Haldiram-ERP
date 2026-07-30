@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
       const formData = await request.formData();
       const file = formData.get('file') as File | null;
       const textContent = formData.get('textContent') as string | null;
-      const provider = (formData.get('provider') as string) || 'ollama';
+      const provider = (formData.get('provider') as string) || 'bazaarlink';
 
       if (textContent) {
         text = textContent;
@@ -150,7 +150,7 @@ export async function POST(request: NextRequest) {
     } else {
       const body = await request.json();
       text = body.text || body.content || '';
-      const provider = body.provider || 'ollama';
+      const provider = body.provider || 'bazaarlink';
 
       if (!text || text.trim().length === 0) {
         return NextResponse.json({ error: 'No text provided' }, { status: 400 });

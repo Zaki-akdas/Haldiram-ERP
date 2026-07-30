@@ -1,4 +1,4 @@
-export type AIProvider = 'ollama' | 'gemini' | 'azure';
+export type AIProvider = 'ollama' | 'gemini' | 'azure' | 'bazaarlink';
 
 export interface AIConfig {
   provider: AIProvider;
@@ -37,6 +37,13 @@ export function getDefaultConfig(provider: AIProvider): AIConfig {
         temperature: 0.1,
         maxTokens: 4096,
       };
+    case 'bazaarlink':
+      return {
+        provider: 'bazaarlink',
+        model: process.env.AI_MODEL || 'llama3.2:3b',
+        temperature: 0.1,
+        maxTokens: 4096,
+      };
   }
 }
 
@@ -48,6 +55,8 @@ export function isProviderConfigured(provider: AIProvider): boolean {
       return !!process.env.GEMINI_API_KEY;
     case 'azure':
       return !!(process.env.AZURE_OPENAI_API_KEY && process.env.AZURE_OPENAI_ENDPOINT);
+    case 'bazaarlink':
+      return !!process.env.AI_API_KEY && !!process.env.AI_BASE_URL;
   }
 }
 
@@ -55,5 +64,6 @@ export function getAvailableProviders(): AIProvider[] {
   const providers: AIProvider[] = ['ollama'];
   if (process.env.GEMINI_API_KEY) providers.push('gemini');
   if (process.env.AZURE_OPENAI_API_KEY && process.env.AZURE_OPENAI_ENDPOINT) providers.push('azure');
+  if (process.env.AI_API_KEY && process.env.AI_BASE_URL) providers.push('bazaarlink');
   return providers;
 }

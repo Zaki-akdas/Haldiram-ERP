@@ -17,7 +17,7 @@ export async function POST(request: NextRequest) {
     const file = formData.get('file') as File | null;
     const targetFormat = (formData.get('targetFormat') as string) || 'csv';
     const mode = (formData.get('mode') as string) || 'fast';
-    const providerParam = (formData.get('provider') as string) || 'ollama';
+    const providerParam = (formData.get('provider') as string) || 'bazaarlink';
 
     if (!file) {
       return NextResponse.json({ error: 'File is required' }, { status: 400 });

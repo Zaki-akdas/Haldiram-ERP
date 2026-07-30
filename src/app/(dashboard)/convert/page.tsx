@@ -6,7 +6,7 @@ import { useAuth } from '@/components/AuthProvider';
 type InputType = 'pdf' | 'excel' | 'csv';
 type OutputType = 'csv' | 'copy-paste';
 type Mode = 'fast' | 'ai';
-type AIProvider = 'ollama' | 'gemini' | 'azure';
+type AIProvider = 'ollama' | 'gemini' | 'azure' | 'bazaarlink';
 
 export default function ConvertPage() {
   const { authFetch } = useAuth();
@@ -14,7 +14,7 @@ export default function ConvertPage() {
   const [inputType, setInputType] = useState<InputType>('pdf');
   const [outputType, setOutputType] = useState<OutputType>('csv');
   const [mode, setMode] = useState<Mode>('fast');
-  const [provider, setProvider] = useState<AIProvider>('ollama');
+  const [provider, setProvider] = useState<AIProvider>('bazaarlink');
   const [converting, setConverting] = useState(false);
   const [preview, setPreview] = useState<string | null>(null);
   const [error, setError] = useState('');
@@ -90,7 +90,7 @@ export default function ConvertPage() {
       setDownloadName(data.filename || '');
 
       if (mode === 'ai') {
-        const providerLabel = provider === 'ollama' ? 'Local Ollama' : provider === 'gemini' ? 'Google Gemini' : 'Azure OpenAI';
+        const providerLabel = provider === 'ollama' ? 'Local Ollama' : provider === 'gemini' ? 'Google Gemini' : provider === 'azure' ? 'Azure OpenAI' : 'BazaarLink';
         setWarning(`AI mode used ${providerLabel}. If results are poor, try Fast mode or switch provider.`);
       }
     } catch (err) {
@@ -209,10 +209,11 @@ export default function ConvertPage() {
                 <option value="ollama">🖥️ Local Ollama</option>
                 <option value="gemini">☁️ Google Gemini</option>
                 <option value="azure">🌐 Azure OpenAI</option>
+                <option value="bazaarlink">🔌 BazaarLink</option>
               </select>
               {mode === 'ai' && (
                 <p className="text-[10px] text-slate-400 mt-1">
-                  {provider === 'ollama' ? 'Requires local Ollama server' : provider === 'gemini' ? 'Requires GEMINI_API_KEY' : 'Requires Azure OpenAI config'}
+                  {provider === 'ollama' ? 'Requires local Ollama server' : provider === 'gemini' ? 'Requires GEMINI_API_KEY' : provider === 'azure' ? 'Requires Azure OpenAI config' : 'Requires AI_BASE_URL and AI_API_KEY'}
                 </p>
               )}
             </div>
