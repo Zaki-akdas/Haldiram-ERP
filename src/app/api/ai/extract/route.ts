@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { getSupabaseAdmin } from '@/db';
-import { callOllama, normalizeExtraction, computeConfidence, extractTextFromFile } from '@/lib/ai-extract';
+import { extractTextFromFile } from '@/lib/ai-extract';
+import { extractWithProvider } from '@/lib/ai-service';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,7 +20,8 @@ export async function POST(request: NextRequest) {
       const formData = await request.formData();
       const file = formData.get('file') as File | null;
       const textContent = formData.get('textContent') as string | null;
-      
+      const provider = (formData.get('provider') as string) || 'ollama';
+
       if (textContent) {
         text = textContent;
       } else if (file) {
@@ -28,94 +30,141 @@ export async function POST(request: NextRequest) {
         const ext = file.name.split('.').pop()?.toLowerCase() || '';
         text = await extractTextFromFile(buffer, ext);
       }
+
+      if (!text || text.trim().length === 0) {
+        return NextResponse.json({ error: 'No text or file provided' }, { status: 400 });
+      }
+
+      const result = await extractWithProvider(text, {
+        provider: provider as any,
+        model: '',
+        temperature: 0.1,
+        maxTokens: 4096,
+      });
+
+      if (result.error || !result.normalized) {
+        return NextResponse.json({
+          extracted: null,
+          validation: {
+            passed: [],
+            warnings: [result.error || 'AI extraction failed'],
+            errors: [result.error || 'AI extraction failed'],
+            score: 0,
+          },
+          recommendation: {
+            format: provider,
+            confidence: 0,
+            reason: result.error || 'AI extraction failed',
+            tips: ['Try Fast/regex mode instead', 'Ensure AI provider is configured'],
+          },
+          fileName: file?.name || 'ai-upload',
+          fileSize: text.length,
+          aiError: result.error,
+          fallbackToRegex: true,
+        });
+      }
+
+      let invoiceId: number | null = null;
+      try {
+        const supabase = getSupabaseAdmin();
+        const { data: invoice, error: invoiceError } = await supabase
+          .from('invoices')
+          .insert({
+            file_name: 'ai-upload',
+            file_type: `ai-${provider}`,
+            file_size: text.length,
+            extracted_data: result.normalized as any,
+            validation_result: { aiError: null } as any,
+            uploaded_by_id: user.id,
+            status: 'pending',
+          })
+          .select()
+          .single();
+        if (!invoiceError && invoice) {
+          invoiceId = invoice.id;
+        }
+      } catch {
+        // ignore save errors
+      }
+
+      return NextResponse.json({
+        extracted: result.normalized,
+        validation: {
+          passed: [],
+          warnings: [],
+          errors: [],
+          score: result.confidence,
+        },
+        recommendation: {
+          format: provider,
+          confidence: result.confidence,
+          reason: `Extracted using ${provider}`,
+          tips: ['Review extracted items before importing'],
+        },
+        fileName: file?.name || 'ai-upload',
+        fileSize: text.length,
+        invoiceId,
+        aiError: null,
+      });
     } else {
       const body = await request.json();
       text = body.text || body.content || '';
-    }
+      const provider = body.provider || 'ollama';
 
-    if (!text || text.trim().length === 0) {
-      return NextResponse.json({ error: 'No text or file provided' }, { status: 400 });
-    }
-
-    const truncated = text.length > 20000 ? text.substring(0, 20000) + '\n\n[TRUNCATED]' : text;
-
-    let rawAi = null;
-    let aiError = null;
-    try {
-      rawAi = await callOllama(truncated);
-    } catch (err) {
-      console.warn('Ollama extraction failed:', err);
-      aiError = err instanceof Error ? err.message : 'Ollama unavailable';
-    }
-
-    let extracted: any;
-    if (rawAi) {
-      extracted = normalizeExtraction(rawAi);
-      extracted.metadata.rawTextLength = text.length;
-      extracted.metadata.extractionConfidence = computeConfidence(extracted);
-    } else {
-      extracted = {
-        seller: { name: '', address: '', gstin: '', pan: '', fssai: '', phone: '' },
-        buyer: { name: '', address: '', phone: '', gstin: '' },
-        invoice: { number: '', date: '', salesman: '', beat: '', employeeContact: '' },
-        items: [],
-        totals: {
-          totalQty: 0, subtotal: 0, discount: 0, taxableAmount: 0,
-          cgst: 0, sgst: 0, igst: 0, totalGst: 0, grandTotal: 0,
-          roundOff: 0, amountInWords: '',
-        },
-        metadata: {
-          fileType: 'ai-fallback',
-          extractionConfidence: 0,
-          extractedAt: new Date().toISOString(),
-          rawTextLength: text.length,
-        },
-      };
-    }
-
-    let invoiceId: number | null = null;
-    try {
-      const supabase = getSupabaseAdmin();
-      const { data: invoice, error: invoiceError } = await supabase
-        .from('invoices')
-        .insert({
-          file_name: 'ai-upload',
-          file_type: 'ai-ollama',
-          file_size: text.length,
-          extracted_data: extracted as any,
-          validation_result: { aiError: aiError || null } as any,
-          uploaded_by_id: user.id,
-          status: 'pending',
-        })
-        .select()
-        .single();
-      if (!invoiceError && invoice) {
-        invoiceId = invoice.id;
+      if (!text || text.trim().length === 0) {
+        return NextResponse.json({ error: 'No text provided' }, { status: 400 });
       }
-    } catch {
-      // ignore save errors
-    }
 
-    return NextResponse.json({
-      extracted,
-      validation: { 
-        passed: [], 
-        warnings: aiError ? [`AI model error: ${aiError}`] : [], 
-        errors: aiError ? ['Ollama unavailable, showing empty result'] : [], 
-        score: extracted.metadata.extractionConfidence 
-      },
-      recommendation: {
-        format: 'ai-ollama',
-        confidence: extracted.metadata.extractionConfidence,
-        reason: rawAi ? 'Extracted using local Ollama model.' : 'Ollama unavailable. Please try Fast mode or ensure Ollama is running.',
-        tips: ['Ensure Ollama is running locally', 'Install a fast model like llama3.2:3b or qwen2.5:3b', 'Set OLLAMA_MODEL env var to change model', 'Use Fast mode for instant conversion without AI'],
-      },
-      fileName: 'ai-upload',
-      fileSize: text.length,
-      invoiceId,
-    });
+      const result = await extractWithProvider(text, {
+        provider: provider as any,
+        model: '',
+        temperature: 0.1,
+        maxTokens: 4096,
+      });
+
+      if (result.error || !result.normalized) {
+        return NextResponse.json({
+          extracted: null,
+          validation: {
+            passed: [],
+            warnings: [result.error || 'AI extraction failed'],
+            errors: [result.error || 'AI extraction failed'],
+            score: 0,
+          },
+          recommendation: {
+            format: provider,
+            confidence: 0,
+            reason: result.error || 'AI extraction failed',
+            tips: ['Try Fast/regex mode instead'],
+          },
+          aiError: result.error,
+          fallbackToRegex: true,
+        });
+      }
+
+      return NextResponse.json({
+        extracted: result.normalized,
+        validation: {
+          passed: [],
+          warnings: [],
+          errors: [],
+          score: result.confidence,
+        },
+        recommendation: {
+          format: provider,
+          confidence: result.confidence,
+          reason: `Extracted using ${provider}`,
+          tips: ['Review extracted items before importing'],
+        },
+        aiError: null,
+      });
+    }
   } catch (error) {
     console.error('AI extraction error:', error);
-    return NextResponse.json({ error: 'Failed to extract with AI: ' + (error instanceof Error ? error.message : 'Unknown error') }, { status: 500 });
+    return NextResponse.json({
+      error: 'Failed to extract with AI: ' + (error instanceof Error ? error.message : 'Unknown error'),
+      aiError: error instanceof Error ? error.message : 'Unknown error',
+      fallbackToRegex: true,
+    }, { status: 500 });
   }
 }

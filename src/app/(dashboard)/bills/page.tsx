@@ -39,6 +39,7 @@ export default function BillsPage() {
   const [tab, setTab] = useState<'upload' | 'paste'>('upload');
   const [invoiceId, setInvoiceId] = useState<number | null>(null);
   const [mode, setMode] = useState<'regex' | 'ai'>('regex');
+  const [provider, setProvider] = useState<'ollama' | 'gemini' | 'azure'>('ollama');
   const [downloading, setDownloading] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState(false);
   const [customerNameInput, setCustomerNameInput] = useState('');
@@ -77,11 +78,14 @@ export default function BillsPage() {
         fd.append('textContent', textInput);
       }
 
-      const token = typeof window !== 'undefined' ? localStorage.getItem('salessettle_token') : null;
+      if (mode === 'ai') {
+        fd.append('provider', provider);
+      }
+
       const endpoint = mode === 'ai' ? '/api/ai/extract' : '/api/invoices/extract';
-      const res = await fetch(endpoint, {
-        method: 'POST', body: fd,
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      const res = await authFetch(endpoint, {
+        method: 'POST',
+        body: fd,
       });
 
       if (!res.ok) {
@@ -90,9 +94,29 @@ export default function BillsPage() {
       }
 
       const data = await res.json();
-      setExtracted(data.extracted);
-      setInvoiceId(data.invoiceId || null);
-      setProgress(100);
+
+      if (mode === 'ai' && (data.fallbackToRegex || data.aiError)) {
+        setError('AI extraction failed, falling back to regex...');
+        const fd2 = new FormData();
+        if (tab === 'upload' && file) {
+          fd2.append('file', file);
+        } else {
+          fd2.append('textContent', textInput);
+        }
+        const res2 = await authFetch('/api/invoices/extract', { method: 'POST', body: fd2 });
+        if (!res2.ok) {
+          const err2 = await res2.json().catch(() => ({ error: 'Fallback failed' }));
+          throw new Error(err2.error || 'Regex fallback failed');
+        }
+        const data2 = await res2.json();
+        setExtracted(data2.extracted);
+        setInvoiceId(data2.invoiceId || null);
+        setProgress(100);
+      } else {
+        setExtracted(data.extracted);
+        setInvoiceId(data.invoiceId || null);
+        setProgress(100);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Extraction failed');
     } finally { clearInterval(tick); setExtracting(false); }
@@ -268,9 +292,19 @@ export default function BillsPage() {
             className={`flex-1 px-4 py-2 text-xs font-bold transition-colors ${mode === 'ai'
               ? 'text-purple-600 border-b-2 border-purple-600 bg-purple-50/30 dark:bg-purple-900/10'
               : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}>
-            🤖 AI (Ollama)
+            🤖 AI
           </button>
         </div>
+        {mode === 'ai' && (
+          <div className="px-5 py-2 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-700/30">
+            <label className="text-[10px] font-bold text-slate-400 uppercase mr-2">Provider</label>
+            <select value={provider} onChange={e => setProvider(e.target.value as any)} className="text-xs border border-slate-300 dark:border-slate-600 rounded px-2 py-1 bg-white dark:bg-slate-800 text-slate-800 dark:text-white">
+              <option value="ollama">Ollama</option>
+              <option value="gemini">Gemini</option>
+              <option value="azure">Azure OpenAI</option>
+            </select>
+          </div>
+        )}
 
         <div className="p-5">
           {tab === 'upload' ? (
