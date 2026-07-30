@@ -22,7 +22,7 @@ export async function callAzureOpenAI(text: string, model: string, maxTokens: nu
         messages: [
           {
             role: 'system',
-            content: buildPrompt(text).split('\n\n')[0],
+            content: buildPrompt(''),
           },
           {
             role: 'user',

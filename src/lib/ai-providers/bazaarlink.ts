@@ -3,7 +3,10 @@ import { AIExtractionResult } from '../ai-provider';
 export async function callBazaarLink(text: string, model: string, timeoutMs: number): Promise<AIExtractionResult> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-  const baseUrl = process.env.AI_BASE_URL || 'https://bazaarlink.ai/api/v1';
+  const configuredBaseUrl = (process.env.AI_BASE_URL || 'https://bazaarlink.ai/api/v1').replace(/\/+$/, '');
+  const baseUrl = /\/(?:api\/)?v1$/i.test(configuredBaseUrl)
+    ? configuredBaseUrl
+    : `${configuredBaseUrl}/api/v1`;
   const apiKey = process.env.AI_API_KEY;
 
   if (!apiKey) {

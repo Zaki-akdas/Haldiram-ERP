@@ -11,10 +11,16 @@ export { getDefaultConfig } from './ai-provider';
 
 export async function extractWithProvider(text: string, config: AIConfig): Promise<AIExtractionResult> {
   const truncated = text.length > 20000 ? text.substring(0, 20000) + '\n\n[TRUNCATED]' : text;
+  const resolvedConfig = getDefaultConfig(config.provider);
+  const effectiveConfig: AIConfig = {
+    ...resolvedConfig,
+    ...config,
+    model: config.model || resolvedConfig.model,
+  };
 
-  switch (config.provider) {
+  switch (effectiveConfig.provider) {
     case 'ollama': {
-      const result = await callOllama(truncated, config.model, 60000);
+      const result = await callOllama(truncated, effectiveConfig.model, 60000);
       if (result.error || !result.raw) return result;
       return {
         ...result,
@@ -23,7 +29,7 @@ export async function extractWithProvider(text: string, config: AIConfig): Promi
       };
     }
     case 'gemini': {
-      const result = await callGemini(truncated, config.model, config.maxTokens);
+      const result = await callGemini(truncated, effectiveConfig.model, effectiveConfig.maxTokens);
       if (result.error || !result.raw) return result;
       return {
         ...result,
@@ -32,7 +38,7 @@ export async function extractWithProvider(text: string, config: AIConfig): Promi
       };
     }
     case 'azure': {
-      const result = await callAzureOpenAI(truncated, config.model, config.maxTokens);
+      const result = await callAzureOpenAI(truncated, effectiveConfig.model, effectiveConfig.maxTokens);
       if (result.error || !result.raw) return result;
       return {
         ...result,
@@ -41,7 +47,7 @@ export async function extractWithProvider(text: string, config: AIConfig): Promi
       };
     }
     case 'bazaarlink': {
-      const result = await callBazaarLink(truncated, config.model, 60000);
+      const result = await callBazaarLink(truncated, effectiveConfig.model, 60000);
       if (result.error || !result.raw) return result;
       return {
         ...result,
@@ -50,6 +56,6 @@ export async function extractWithProvider(text: string, config: AIConfig): Promi
       };
     }
     default:
-      return { raw: null, normalized: null, confidence: 0, error: `Unknown provider: ${config.provider}` };
+      return { raw: null, normalized: null, confidence: 0, error: `Unknown provider: ${effectiveConfig.provider}` };
   }
 }

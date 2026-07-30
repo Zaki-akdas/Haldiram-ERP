@@ -3,15 +3,16 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import os from 'os';
+import fs from 'fs';
 
 const execFileAsync = promisify(execFile);
 
 const PDF_EXTRACT_SCRIPT = path.join(process.cwd(), 'scripts', 'pdf-extract.mjs');
 
 async function extractPdfText(buffer: Buffer): Promise<string> {
+  const tmp = path.join(os.tmpdir(), `pdf-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.pdf`);
   try {
-    const tmp = path.join(os.tmpdir(), `pdf-${Date.now()}.pdf`);
-    require('fs').writeFileSync(tmp, buffer);
+    fs.writeFileSync(tmp, buffer);
     const nodeModulesPath = path.join(process.cwd(), 'node_modules');
     const { stdout } = await execFileAsync('node', [PDF_EXTRACT_SCRIPT, tmp], {
       cwd: process.cwd(),
@@ -23,6 +24,8 @@ async function extractPdfText(buffer: Buffer): Promise<string> {
     const message = err instanceof Error ? err.message : String(err);
     console.error('PDF extraction error:', message);
     return '';
+  } finally {
+    try { fs.unlinkSync(tmp); } catch { /* best effort cleanup */ }
   }
 }
 
@@ -304,6 +307,10 @@ export async function excelToCopyPaste(buffer: Buffer): Promise<string> {
     console.error('Excel to Copy-Paste conversion error:', err);
     return '# | Item Name | HSN/SAC | Qty | Unit | Price/Unit (₹) | GST Rate/Amt (₹) | Amount (₹)\n';
   }
+}
+
+export async function csvToCopyPaste(buffer: Buffer): Promise<string> {
+  return excelToCopyPaste(buffer);
 }
 
 export async function pdfToCopyPaste(buffer: Buffer): Promise<string> {

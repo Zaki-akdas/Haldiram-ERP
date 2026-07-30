@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
-import { pdfToCsv, excelToCsv, excelToCopyPaste, pdfToCopyPaste } from '@/lib/converters';
+import { pdfToCsv, excelToCsv, excelToCopyPaste, pdfToCopyPaste, csvToCopyPaste } from '@/lib/converters';
 import { extractTextFromFile } from '@/lib/ai-extract';
 import { AIProvider, getDefaultConfig, extractWithProvider } from '@/lib/ai-service';
 
@@ -181,7 +181,7 @@ export async function POST(request: NextRequest) {
         convertedText = await file.text();
         extension = 'csv';
       } else {
-        convertedText = await excelToCopyPaste(buffer);
+        convertedText = await csvToCopyPaste(buffer);
         extension = 'txt';
       }
     } else {

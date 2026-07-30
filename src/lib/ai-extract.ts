@@ -3,6 +3,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import os from 'os';
+import fs from 'fs';
 
 if (typeof DOMMatrix === 'undefined') {
   (globalThis as any).DOMMatrix = class DOMMatrix {
@@ -15,9 +16,9 @@ const execFileAsync = promisify(execFile);
 const PDF_EXTRACT_SCRIPT = path.join(process.cwd(), 'scripts', 'pdf-extract.mjs');
 
 async function extractPdfText(buffer: Buffer): Promise<string> {
+  const tmp = path.join(os.tmpdir(), `pdf-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.pdf`);
   try {
-    const tmp = path.join(os.tmpdir(), `pdf-${Date.now()}.pdf`);
-    require('fs').writeFileSync(tmp, buffer);
+    fs.writeFileSync(tmp, buffer);
     const nodeModulesPath = path.join(process.cwd(), 'node_modules');
     const { stdout } = await execFileAsync('node', [PDF_EXTRACT_SCRIPT, tmp], {
       cwd: process.cwd(),
@@ -29,6 +30,8 @@ async function extractPdfText(buffer: Buffer): Promise<string> {
     const message = err instanceof Error ? err.message : String(err);
     console.error('PDF extraction error:', message);
     throw new Error(`Text extraction failed for .pdf: ${message}`);
+  } finally {
+    try { fs.unlinkSync(tmp); } catch { /* best effort cleanup */ }
   }
 }
 export const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
@@ -115,6 +118,11 @@ export async function callOllama(text: string): Promise<any> {
 }
 
 export function normalizeExtraction(raw: any): any {
+  const toNumber = (value: unknown): number => {
+    if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+    const parsed = Number(String(value ?? '').replace(/[₹,\s]/g, ''));
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
   const seller = {
     name: String(raw?.seller?.name || '').trim(),
     address: String(raw?.seller?.address || '').trim(),
@@ -139,36 +147,36 @@ export function normalizeExtraction(raw: any): any {
 
   const items = Array.isArray(raw?.items)
     ? raw.items.map((it: any) => ({
-        sno: Number(it.sno) || 0,
+        sno: toNumber(it.sno),
         erpId: String(it.erpId || '').trim(),
         description: String(it.description || '').trim(),
         hsn: String(it.hsn || '').trim(),
-        quantity: Number(it.quantity) || 0,
-        freeQty: Number(it.freeQty) || 0,
+        quantity: toNumber(it.quantity),
+        freeQty: toNumber(it.freeQty),
         unit: String(it.unit || 'PCS').trim(),
-        mrp: Number(it.mrp) || 0,
-        rate: Number(it.rate) || 0,
-        discount: Number(it.discount) || 0,
-        taxable: Number(it.taxable) || 0,
-        gstRate: Number(it.gstRate) || 0,
-        cgst: Number(it.cgst) || 0,
-        sgst: Number(it.sgst) || 0,
-        gst: Number(it.gst) || 0,
-        total: Number(it.total) || 0,
+        mrp: toNumber(it.mrp),
+        rate: toNumber(it.rate),
+        discount: toNumber(it.discount),
+        taxable: toNumber(it.taxable),
+        gstRate: toNumber(it.gstRate),
+        cgst: toNumber(it.cgst),
+        sgst: toNumber(it.sgst),
+        gst: toNumber(it.gst),
+        total: toNumber(it.total),
       }))
     : [];
 
   const totals = {
-    totalQty: Number(raw?.totals?.totalQty) || 0,
-    subtotal: Number(raw?.totals?.subtotal) || 0,
-    discount: Number(raw?.totals?.discount) || 0,
-    taxableAmount: Number(raw?.totals?.taxableAmount) || 0,
-    cgst: Number(raw?.totals?.cgst) || 0,
-    sgst: Number(raw?.totals?.sgst) || 0,
-    igst: Number(raw?.totals?.igst) || 0,
-    totalGst: Number(raw?.totals?.totalGst) || 0,
-    grandTotal: Number(raw?.totals?.grandTotal) || 0,
-    roundOff: Number(raw?.totals?.roundOff) || 0,
+    totalQty: toNumber(raw?.totals?.totalQty),
+    subtotal: toNumber(raw?.totals?.subtotal),
+    discount: toNumber(raw?.totals?.discount),
+    taxableAmount: toNumber(raw?.totals?.taxableAmount),
+    cgst: toNumber(raw?.totals?.cgst),
+    sgst: toNumber(raw?.totals?.sgst),
+    igst: toNumber(raw?.totals?.igst),
+    totalGst: toNumber(raw?.totals?.totalGst),
+    grandTotal: toNumber(raw?.totals?.grandTotal),
+    roundOff: toNumber(raw?.totals?.roundOff),
     amountInWords: String(raw?.totals?.amountInWords || '').trim(),
   };
 

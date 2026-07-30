@@ -785,14 +785,16 @@ function validateExtraction(data: FullExtraction): ValidationResult {
 // ────────────────────── PDF Parser ──────────────────────
 
 async function extractTextFromPDF(buffer: Buffer): Promise<string> {
+  let tmp = '';
   try {
     const { execFile } = await import('node:child_process');
     const { promisify } = await import('node:util');
     const path = await import('node:path');
     const os = await import('node:os');
     const execFileAsync = promisify(execFile);
-    const tmp = path.join(os.tmpdir(), `pdf-${Date.now()}.pdf`);
-    require('fs').writeFileSync(tmp, buffer);
+    const fs = await import('node:fs');
+    tmp = path.join(os.tmpdir(), `pdf-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.pdf`);
+    fs.writeFileSync(tmp, buffer);
     const nodeModulesPath = path.join(process.cwd(), 'node_modules');
     const { stdout } = await execFileAsync('node', [path.join(process.cwd(), 'scripts', 'pdf-extract.mjs'), tmp], {
       cwd: process.cwd(),
@@ -804,6 +806,10 @@ async function extractTextFromPDF(buffer: Buffer): Promise<string> {
     const message = err instanceof Error ? err.message : String(err);
     console.error('PDF extraction error:', message);
     throw new Error(`Text extraction failed for .pdf: ${message}`);
+  } finally {
+    if (tmp) {
+      try { (await import('node:fs')).unlinkSync(tmp); } catch { /* best effort cleanup */ }
+    }
   }
 }
 
@@ -1286,11 +1292,29 @@ function isLikelyMarkdownTable(text: string): boolean {
 }
 
 function parseCSV(text: string): FullExtraction {
-  const lines = text.split('\n').filter(l => l.trim());
+  const parseLine = (line: string): string[] => {
+    const cells: string[] = [];
+    let cell = '';
+    let quoted = false;
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i];
+      if (char === '"') {
+        if (quoted && line[i + 1] === '"') { cell += '"'; i++; }
+        else quoted = !quoted;
+      } else if ((char === ',' || char === '\t') && !quoted) {
+        cells.push(cell.trim()); cell = '';
+      } else {
+        cell += char;
+      }
+    }
+    cells.push(cell.trim());
+    return cells;
+  };
+  const lines = text.split(/\r?\n/).filter(l => l.trim());
   if (lines.length < 2) return extractAll('');
 
-  const headers = lines[0].split(/[,\t]/).map(h => h.trim().replace(/"/g, '').toLowerCase());
-  const rows = lines.slice(1).map(l => l.split(/[,\t]/).map(v => v.trim().replace(/"/g, '')));
+  const headers = parseLine(lines[0]).map(h => h.toLowerCase());
+  const rows = lines.slice(1).map(parseLine);
 
   const extraction = parseRows(headers, rows);
   extraction.metadata.fileType = 'csv';
@@ -1300,7 +1324,6 @@ function parseCSV(text: string): FullExtraction {
 
 function parseExcel(buffer: Buffer): FullExtraction {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const XLSX = require('xlsx');
     const workbook = XLSX.read(buffer, { type: 'buffer' });
     const sheetName = workbook.SheetNames[0];
@@ -1319,7 +1342,7 @@ function parseExcel(buffer: Buffer): FullExtraction {
     
     // Look for key labels in the grid
     for (let r = 0; r < jsonData.length; r++) {
-      for (let c = 0; r < jsonData[r]?.length && c < jsonData[r].length; c++) {
+      for (let c = 0; c < (jsonData[r]?.length || 0); c++) {
         const cell = String(jsonData[r][c] || '').trim();
         fullText += cell + ' ';
         

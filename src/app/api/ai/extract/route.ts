@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { getSupabaseAdmin } from '@/db';
 import { extractTextFromFile } from '@/lib/ai-extract';
-import { extractWithProvider } from '@/lib/ai-service';
+import { extractWithProvider, getDefaultConfig } from '@/lib/ai-service';
 
 export const dynamic = 'force-dynamic';
 
@@ -76,12 +76,7 @@ export async function POST(request: NextRequest) {
         });
       }
 
-      const result = await extractWithProvider(text, {
-        provider: provider as any,
-        model: '',
-        temperature: 0.1,
-        maxTokens: 4096,
-      });
+      const result = await extractWithProvider(text, getDefaultConfig(provider as any));
 
       if (result.error || !result.normalized) {
         return NextResponse.json({
@@ -156,12 +151,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'No text provided' }, { status: 400 });
       }
 
-      const result = await extractWithProvider(text, {
-        provider: provider as any,
-        model: '',
-        temperature: 0.1,
-        maxTokens: 4096,
-      });
+      const result = await extractWithProvider(text, getDefaultConfig(provider as any));
 
       if (result.error || !result.normalized) {
         return NextResponse.json({
