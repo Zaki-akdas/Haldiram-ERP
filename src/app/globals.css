@@ -3,54 +3,86 @@
 @variant dark (&:where(.dark, .dark *));
 
 @theme {
-  --color-primary: var(--color-emerald-600);
-  --color-primary-hover: var(--color-emerald-700);
-  --color-secondary: var(--color-zinc-900);
-  
+  --color-primary: #2563eb;
+  --color-primary-hover: #1d4ed8;
+  --color-primary-soft: #dbeafe;
+  --color-secondary: #0f172a;
+  --color-accent: #14b8a6;
+
   --radius-xl: 1rem;
   --radius-2xl: 1.5rem;
-  
-  --shadow-soft: 0 4px 20px -2px rgba(0, 0, 0, 0.05);
-  --shadow-cool: 0 10px 40px -4px rgba(0, 0, 0, 0.1);
+
+  --shadow-soft: 0 12px 35px -12px rgba(15, 23, 42, 0.18);
+  --shadow-cool: 0 24px 60px -24px rgba(15, 23, 42, 0.28);
 }
 
 @layer base {
-  body {
-    @apply bg-zinc-50 text-zinc-900 transition-colors duration-300;
+  :root {
+    color-scheme: light;
   }
-  
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply min-h-screen bg-slate-100 text-slate-900 antialiased transition-colors duration-300;
+    font-family: var(--font-sans), system-ui, sans-serif;
+    background-image: radial-gradient(circle at top left, rgba(37, 99, 235, 0.14), transparent 34%), linear-gradient(135deg, #f8fafc 0%, #eef4ff 100%);
+    background-attachment: fixed;
+  }
+
   .dark body {
-    @apply bg-zinc-950 text-zinc-100;
+    @apply bg-slate-950 text-slate-100;
+    background-image: radial-gradient(circle at top left, rgba(56, 189, 248, 0.16), transparent 34%), linear-gradient(135deg, #020617 0%, #0f172a 100%);
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: var(--font-display), var(--font-sans), sans-serif;
+    letter-spacing: -0.025em;
+  }
+
+  ::selection {
+    @apply bg-blue-600/20 text-slate-900;
   }
 }
 
 @layer components {
   .glass-card {
-    @apply bg-white/80 backdrop-blur-md border border-white/20 shadow-soft;
+    @apply rounded-2xl border border-slate-200/80 bg-white/80 shadow-soft backdrop-blur-xl;
   }
-  
+
   .dark .glass-card {
-    @apply bg-zinc-900/80 border-zinc-800/50;
+    @apply border-slate-800/70 bg-slate-900/80;
   }
-  
+
   .btn-primary {
-    @apply px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl transition-all active:scale-[0.98] shadow-sm flex items-center justify-center gap-2 disabled:opacity-50 disabled:pointer-events-none;
+    @apply inline-flex items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-3 font-semibold text-white shadow-lg shadow-blue-600/20 transition-all duration-200 hover:bg-blue-700 hover:shadow-blue-700/25 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-60;
   }
-  
+
   .input-field {
-    @apply w-full px-4 py-3 bg-zinc-100 dark:bg-zinc-800 border-transparent border focus:border-emerald-500 rounded-xl outline-none transition-all text-zinc-900 dark:text-zinc-100;
+    @apply w-full rounded-2xl border border-slate-200 bg-slate-50/90 px-4 py-3 text-slate-900 outline-none transition-all duration-200 placeholder:text-slate-400 focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:bg-slate-900;
   }
-  
+
   .sidebar-link {
-    @apply flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 text-sm font-medium;
+    @apply flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-semibold tracking-tight transition-all duration-200;
   }
-  
+
   .sidebar-link-active {
-    @apply bg-emerald-600 text-white shadow-lg shadow-emerald-600/20;
+    @apply bg-blue-600 text-white shadow-lg shadow-blue-600/20;
   }
-  
+
   .sidebar-link-inactive {
-    @apply text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800;
+    @apply text-slate-400 hover:bg-slate-900/70 hover:text-white dark:text-slate-400 dark:hover:bg-slate-800/80;
+  }
+
+  .app-shell {
+    @apply rounded-[28px] border border-slate-200/70 bg-white/80 shadow-soft backdrop-blur-xl dark:border-slate-800/70 dark:bg-slate-900/70;
   }
 }
 
@@ -64,19 +96,18 @@
   animation: fadeIn 0.4s ease-out forwards;
 }
 
-/* Custom Scrollbar */
-::-webkit-scrollbar {
+.custom-scrollbar::-webkit-scrollbar {
   width: 6px;
 }
 
-::-webkit-scrollbar-track {
+.custom-scrollbar::-webkit-scrollbar-track {
   @apply bg-transparent;
 }
 
-::-webkit-scrollbar-thumb {
-  @apply bg-zinc-300 dark:bg-zinc-700 rounded-full;
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  @apply rounded-full bg-slate-300 dark:bg-slate-700;
 }
 
-::-webkit-scrollbar-thumb:hover {
-  @apply bg-zinc-400 dark:bg-zinc-600;
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  @apply bg-slate-400 dark:bg-slate-600;
 }

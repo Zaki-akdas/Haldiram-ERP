@@ -23,9 +23,7 @@ export default function Sidebar({ isOpen, onClose }: { isOpen: boolean; onClose:
   const pathname = usePathname();
   const { user, logout } = useAuth();
 
-  const filteredNav = navItems.filter(item =>
-    user && item.roles.includes(user.role)
-  );
+  const filteredNav = navItems.filter(item => user && item.roles.includes(user.role));
 
   const handleLogout = async () => {
     await logout();
@@ -34,73 +32,54 @@ export default function Sidebar({ isOpen, onClose }: { isOpen: boolean; onClose:
 
   return (
     <>
-      {/* Mobile overlay */}
       {isOpen && (
-        <div
-          className="fixed inset-0 bg-zinc-950/40 backdrop-blur-sm z-40 lg:hidden"
-          onClick={onClose}
-        />
+        <div className="fixed inset-0 z-40 bg-slate-950/45 backdrop-blur-sm lg:hidden" onClick={onClose} />
       )}
 
-      {/* Sidebar */}
-      <aside className={`
-        fixed top-0 left-0 z-50 h-full w-72 bg-white dark:bg-zinc-950
-        border-r border-zinc-200 dark:border-zinc-800
-        transform transition-all duration-300 ease-in-out
-        lg:translate-x-0 lg:static lg:z-auto
-        ${isOpen ? 'translate-x-0' : '-translate-x-full'}
-      `}>
-        <div className="flex flex-col h-full">
-          {/* Logo */}
-          <div className="p-8 pb-4">
-            <div className="flex items-center gap-3 mb-1">
+      <aside className={`fixed left-0 top-0 z-50 h-full w-72 border-r border-slate-800/80 bg-slate-950 text-slate-100 shadow-[20px_0_60px_-20px_rgba(2,6,23,0.65)] transition-all duration-300 ease-in-out lg:static lg:z-auto lg:translate-x-0 ${isOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+        <div className="flex h-full flex-col">
+          <div className="p-7 pb-4">
+            <div className="mb-3 flex items-center gap-3 rounded-2xl border border-slate-800 bg-slate-900/70 px-3 py-3">
               <img src="/logo.png" alt="Swami Sharanam" className="h-10 w-auto" />
             </div>
-            <p className="text-[9px] text-zinc-400 dark:text-zinc-500 font-black uppercase tracking-[0.1em] mt-1 border-t border-zinc-100 dark:border-zinc-800 pt-1">Distribution Hub</p>
+            <p className="mt-2 border-t border-slate-800 pt-2 text-[9px] font-black uppercase tracking-[0.24em] text-slate-400">Distribution Hub</p>
           </div>
 
-          {/* User Profile */}
-          <div className="mx-4 my-6 p-4 bg-zinc-50 dark:bg-zinc-900/50 rounded-2xl border border-zinc-100 dark:border-zinc-800">
+          <div className="mx-4 my-5 rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
             <div className="flex items-center gap-3">
-              <div className="w-12 h-12 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 rounded-xl flex items-center justify-center font-black text-lg border border-emerald-200 dark:border-emerald-800">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-blue-500/20 bg-blue-500/10 text-lg font-black text-blue-300">
                 {user?.name ? user.name.charAt(0).toUpperCase() : '?'}
               </div>
               <div className="min-w-0">
-                <p className="font-bold text-sm text-zinc-900 dark:text-white truncate">{user?.name || 'Guest'}</p>
-                <p className="text-[10px] text-emerald-600 font-bold uppercase tracking-wider">{user?.role || 'loading'}</p>
+                <p className="truncate text-sm font-bold text-white">{user?.name || 'Guest'}</p>
+                <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-blue-400">{user?.role || 'loading'}</p>
               </div>
             </div>
           </div>
 
-          {/* Navigation */}
           <nav className="flex-1 overflow-y-auto px-4 py-2 custom-scrollbar">
-            <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-600 uppercase tracking-widest mb-4 ml-4">Main Menu</p>
+            <p className="mb-4 ml-4 text-[10px] font-black uppercase tracking-[0.24em] text-slate-500">Main Menu</p>
             <ul className="space-y-1">
-              {filteredNav.map(item => (
-                <li key={item.href}>
-                  <Link
-                    href={item.href}
-                    onClick={onClose}
-                    className={`sidebar-link ${pathname === item.href ? 'sidebar-link-active' : 'sidebar-link-inactive'}`}
-                  >
-                    <span className="text-lg">{item.icon}</span>
-                    <span className="font-bold tracking-tight">{item.label}</span>
-                  </Link>
-                </li>
-              ))}
+              {filteredNav.map(item => {
+                const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
+                return (
+                  <li key={item.href}>
+                    <Link href={item.href} onClick={onClose} className={`sidebar-link ${isActive ? 'sidebar-link-active' : 'sidebar-link-inactive'}`}>
+                      <span className="text-lg">{item.icon}</span>
+                      <span className="font-bold tracking-tight">{item.label}</span>
+                    </Link>
+                  </li>
+                );
+              })}
             </ul>
           </nav>
 
-          {/* Footer / Logout */}
-          <div className="p-6 border-t border-zinc-100 dark:border-zinc-800 space-y-3">
-            <p className="text-center text-[10px] text-zinc-400 dark:text-zinc-600 font-medium">
-              Made by <span className="font-bold text-emerald-600">Zaki</span>
+          <div className="space-y-3 border-t border-slate-800 p-6">
+            <p className="text-center text-[10px] font-medium text-slate-500">
+              Built for <span className="font-bold text-blue-400">operational clarity</span>
             </p>
-            <button
-              onClick={handleLogout}
-              className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 transition-all duration-200 group"
-            >
-              <span className="group-hover:rotate-12 transition-transform">🚪</span>
+            <button onClick={handleLogout} className="group flex w-full items-center gap-3 rounded-2xl border border-slate-800 px-4 py-3 text-sm font-bold text-rose-400 transition-all duration-200 hover:bg-rose-500/10">
+              <span className="transition-transform group-hover:rotate-12">🚪</span>
               <span>Sign Out</span>
             </button>
           </div>

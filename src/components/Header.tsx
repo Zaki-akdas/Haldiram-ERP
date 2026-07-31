@@ -38,90 +38,72 @@ export default function Header({ onMenuClick }: HeaderProps) {
   if (!mounted) return null;
 
   return (
-    <header className="sticky top-0 z-30 bg-white/70 dark:bg-zinc-950/70 backdrop-blur-xl border-b border-zinc-200 dark:border-zinc-800 px-6 py-4">
+    <header className="sticky top-0 z-30 border-b border-slate-200/80 bg-white/75 px-6 py-4 backdrop-blur-xl dark:border-slate-800/80 dark:bg-slate-950/75">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <button
-            onClick={onMenuClick}
-            className="lg:hidden p-2.5 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-900 rounded-xl transition-colors"
-          >
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <button onClick={onMenuClick} className="rounded-2xl border border-slate-200 bg-slate-50 p-2.5 text-slate-600 transition-colors hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 lg:hidden">
+            <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 6h16M4 12h16M4 18h16" />
             </svg>
           </button>
 
           <div className="flex items-center gap-3">
-            <img src="/logo.png" alt="Swami Sharanam" className="h-8 w-auto hidden sm:block" />
+            <img src="/logo.png" alt="Swami Sharanam" className="hidden h-8 w-auto sm:block" />
             <div>
-              <h2 className="text-xl font-black text-zinc-900 dark:text-white tracking-tight">
-                {user?.name ? `${user.name.split(' ')[0]},` : 'Welcome'} <span className="text-emerald-600 italic">Welcome</span>
+              <h2 className="text-xl font-black tracking-tight text-slate-900 dark:text-white">
+                {user?.name ? `${user.name.split(' ')[0]},` : 'Welcome'} <span className="italic text-blue-600">Welcome</span>
               </h2>
             </div>
           </div>
         </div>
 
         <div className="flex items-center gap-3">
-          <div className="hidden sm:flex flex-col items-end mr-4">
-            <p className="text-xs font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest">
+          <div className="mr-4 hidden flex-col items-end sm:flex">
+            <p className="text-xs font-black uppercase tracking-[0.24em] text-slate-400 dark:text-slate-500">
               {new Date().toLocaleDateString('en-IN', { weekday: 'long' })}
             </p>
-            <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
+            <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
               {new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
             </p>
           </div>
 
-          <div className="flex items-center p-1 bg-zinc-100 dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800">
-            <Link
-              href="/reference"
-              className="p-2 rounded-xl text-zinc-500 hover:text-emerald-500 transition-colors"
-              title="Quick Reference"
-            >
+          <div className="flex items-center rounded-2xl border border-slate-200 bg-slate-100 p-1 dark:border-slate-800 dark:bg-slate-900">
+            <Link href="/reference" className="rounded-xl p-2 text-slate-500 transition-colors hover:text-blue-500" title="Quick Reference">
               📚
             </Link>
-            <button
-              onClick={() => setTheme(false)}
-              className={`p-2 rounded-xl transition-all duration-300 ${!darkMode ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}
-              title="Light mode"
-            >
+            <button onClick={() => setTheme(false)} className={`rounded-xl p-2 transition-all duration-300 ${!darkMode ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-300'}`} title="Light mode">
               ☀️
             </button>
-            <button
-              onClick={() => setTheme(true)}
-              className={`p-2 rounded-xl transition-all duration-300 ${darkMode ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-900'}`}
-              title="Dark mode"
-            >
+            <button onClick={() => setTheme(true)} className={`rounded-xl p-2 transition-all duration-300 ${darkMode ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-500 hover:text-slate-900'}`} title="Dark mode">
               🌙
             </button>
           </div>
 
           <div className="relative">
-            <button 
-              onClick={() => setShowNotifications(!showNotifications)}
-              className={`relative p-2.5 bg-zinc-100 dark:bg-zinc-900 transition-colors border border-zinc-200 dark:border-zinc-800 rounded-xl ${showNotifications ? 'text-emerald-500 border-emerald-500' : 'text-zinc-600 dark:text-zinc-400 hover:text-emerald-500'}`}
-            >
+            <button onClick={() => setShowNotifications(!showNotifications)} className={`relative rounded-2xl border border-slate-200 bg-slate-100 p-2.5 transition-colors dark:border-slate-800 dark:bg-slate-900 ${showNotifications ? 'border-blue-500 text-blue-500' : 'text-slate-600 hover:text-blue-500 dark:text-slate-400'}`}>
               <span className="text-lg">🔔</span>
-              <span className="absolute top-2 right-2.5 w-2 h-2 bg-emerald-500 rounded-full ring-2 ring-zinc-100 dark:ring-zinc-900"></span>
+              <span className="absolute right-2.5 top-2 h-2 w-2 rounded-full bg-blue-500 ring-2 ring-slate-100 dark:ring-slate-900"></span>
             </button>
-            
+
             {showNotifications && (
-              <div className="absolute right-0 mt-3 w-80 bg-white dark:bg-zinc-900 rounded-3xl shadow-cool border border-zinc-100 dark:border-zinc-800 overflow-hidden animate-fade-in">
-                <div className="p-5 border-b border-zinc-50 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-800/30 flex justify-between items-center">
-                  <h3 className="font-black text-xs uppercase tracking-widest text-zinc-400">Notifications</h3>
-                  <span className="text-[10px] font-black text-emerald-600 bg-emerald-50 dark:bg-emerald-900/30 px-2 py-0.5 rounded-full">2 NEW</span>
+              <div className="absolute right-0 mt-3 w-80 overflow-hidden rounded-3xl border border-slate-200 bg-white/95 shadow-cool animate-fade-in dark:border-slate-800 dark:bg-slate-900/95">
+                <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/70 p-5 dark:border-slate-800 dark:bg-slate-800/30">
+                  <h3 className="text-xs font-black uppercase tracking-[0.24em] text-slate-400">Notifications</h3>
+                  <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-black text-blue-600 dark:bg-blue-900/30">2 NEW</span>
                 </div>
-                <div className="divide-y divide-zinc-50 dark:divide-zinc-800">
-                  <div className="p-4 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
-                    <p className="text-sm font-bold text-zinc-900 dark:text-white leading-tight">System Update</p>
-                    <p className="text-xs text-zinc-500 mt-1">Multi-payment modes and bulk delete are now active.</p>
-                    <p className="text-[10px] text-zinc-400 mt-2 font-medium">Just now</p>
+                <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                  <div className="p-4 transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                    <p className="text-sm font-bold leading-tight text-slate-900 dark:text-white">System Update</p>
+                    <p className="mt-1 text-xs text-slate-500">Multi-payment modes and bulk delete are now active.</p>
+                    <p className="mt-2 text-[10px] font-medium text-slate-400">Just now</p>
                   </div>
-                  <div className="p-4 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
-                    <p className="text-sm font-bold text-zinc-900 dark:text-white leading-tight">New Order Confirmed</p>
-                    <p className="text-xs text-zinc-500 mt-1">Invoice PSSE/15792 has been successfully punched.</p>
-                    <p className="text-[10px] text-zinc-400 mt-2 font-medium">10 mins ago</p>
+                  <div className="p-4 transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                    <p className="text-sm font-bold leading-tight text-slate-900 dark:text-white">New Order Confirmed</p>
+                    <p className="mt-1 text-xs text-slate-500">Invoice PSSE/15792 has been successfully punched.</p>
+                    <p className="mt-2 text-[10px] font-medium text-slate-400">10 mins ago</p>
                   </div>
                 </div>
-                <button className="w-full p-4 text-[10px] font-black text-zinc-400 hover:text-emerald-500 uppercase tracking-widest border-t border-zinc-50 dark:border-zinc-800 transition-colors">
+                <button className="w-full border-t border-slate-100 p-4 text-[10px] font-black uppercase tracking-[0.24em] text-slate-400 transition-colors hover:text-blue-500 dark:border-slate-800">
                   Clear All
                 </button>
               </div>
