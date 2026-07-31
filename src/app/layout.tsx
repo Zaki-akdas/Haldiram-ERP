@@ -11,9 +11,9 @@ export const metadata: Metadata = {
   title: "Swami Sharanam - Sales Order Distribution & Settlement",
   description: "AI-powered sales order distribution, delivery, and cash settlement management system",
   icons: {
-    icon: "/logo.png",
-    shortcut: "/logo.png",
-    apple: "/logo.png",
+    icon: "/logo-icon.svg",
+    shortcut: "/logo-icon.svg",
+    apple: "/logo-icon.svg",
   },
 };
 

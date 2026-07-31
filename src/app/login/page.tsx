@@ -58,7 +58,7 @@ export default function LoginPage() {
           <div className="absolute -right-10 bottom-0 h-96 w-96 animate-pulse rounded-full bg-blue-400 blur-3xl delay-700"></div>
         </div>
         <div className="relative z-10 px-12 text-center">
-          <img src="/logo.png" alt="Swami Sharanam" className="mx-auto mb-8 h-32 w-auto drop-shadow-2xl" />
+          <img src="/logo.svg" alt="Swami Sharanam" className="mx-auto mb-8 h-32 w-auto drop-shadow-2xl" />
           <h1 className="mb-6 text-6xl font-black tracking-tighter text-white">Swami Sharanam</h1>
           <p className="mx-auto max-w-md text-xl font-medium leading-relaxed text-slate-300">
             The next generation of sales distribution, collections, and field execution management.
@@ -79,7 +79,7 @@ export default function LoginPage() {
       <div className="relative flex flex-1 items-center justify-center p-6 sm:p-12 lg:p-24">
         <div className="w-full max-w-md space-y-8 animate-fade-in">
           <div className="mb-8 text-center lg:hidden">
-            <img src="/logo.png" alt="Swami Sharanam" className="mx-auto mb-4 h-20 w-auto" />
+            <img src="/logo-icon.svg" alt="Swami Sharanam" className="mx-auto mb-4 h-20 w-auto" />
             <h1 className="text-3xl font-black tracking-tighter text-blue-600">Swami Sharanam</h1>
           </div>
 

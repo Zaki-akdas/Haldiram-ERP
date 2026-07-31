@@ -48,7 +48,7 @@ export default function Header({ onMenuClick }: HeaderProps) {
           </button>
 
           <div className="flex items-center gap-3">
-            <img src="/logo.png" alt="Swami Sharanam" className="hidden h-8 w-auto sm:block" />
+            <img src="/logo.svg" alt="Swami Sharanam" className="hidden h-9 w-auto sm:block" />
             <div>
               <h2 className="text-xl font-black tracking-tight text-slate-900 dark:text-white">
                 {user?.name ? `${user.name.split(' ')[0]},` : 'Welcome'} <span className="italic text-blue-600">Welcome</span>

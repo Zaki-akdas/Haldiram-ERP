@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 80" width="320" height="80">
+  <defs>
+    <linearGradient id="primary" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#2563eb;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#1d4ed8;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#3b82f6;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#60a5fa;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+
+  <!-- Icon: Hexagonal "SS" Monogram with Distribution Nodes -->
+  <g transform="translate(4, 4)">
+    <!-- Outer hexagon -->
+    <path d="M30 0 L56 10 L56 38 L30 48 L4 38 L4 10 Z"
+          fill="url(#primary)"
+          opacity="0.12"
+          rx="4"/>
+    
+    <!-- Inner hexagon -->
+    <path d="M30 4 L52 12 L52 36 L30 44 L8 36 L8 12 Z"
+          fill="none"
+          stroke="url(#primary)"
+          stroke-width="1.5"
+          opacity="0.5"/>
+
+    <!-- Network/Distribution nodes - top -->
+    <circle cx="30" cy="4" r="2.5" fill="url(#primary)"/>
+    <circle cx="30" cy="4" r="1" fill="white"/>
+    
+    <!-- Network/Distribution nodes - bottom -->
+    <circle cx="30" cy="44" r="2.5" fill="url(#primary)"/>
+    <circle cx="30" cy="44" r="1" fill="white"/>
+
+    <!-- Network/Distribution nodes - left -->
+    <circle cx="8" cy="12" r="2" fill="url(#accent)"/>
+    <circle cx="8" cy="12" r="0.8" fill="white"/>
+
+    <!-- Network/Distribution nodes - right -->
+    <circle cx="52" cy="12" r="2" fill="url(#accent)"/>
+    <circle cx="52" cy="12" r="0.8" fill="white"/>
+
+    <!-- Network connection lines -->
+    <line x1="30" y1="4" x2="30" y2="44" stroke="url(#primary)" stroke-width="1" opacity="0.4"/>
+    <line x1="8" y1="12" x2="30" y2="44" stroke="url(#accent)" stroke-width="0.8" opacity="0.3"/>
+    <line x1="52" y1="12" x2="30" y2="44" stroke="url(#accent)" stroke-width="0.8" opacity="0.3"/>
+    <line x1="8" y1="12" x2="30" y2="4" stroke="url(#accent)" stroke-width="0.8" opacity="0.25"/>
+    <line x1="52" y1="12" x2="30" y2="4" stroke="url(#accent)" stroke-width="0.8" opacity="0.25"/>
+
+    <!-- Stylized "S" characters forming the monogram -->
+    <!-- First S -->
+    <path d="M22 14 C18 14 15 16 15 20 C15 24 18 26 22 26 C25 26 28 28 28 31 C28 34 25 36 22 36"
+          fill="none" stroke="url(#primary)" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M18 20 L18 20" stroke="url(#primary)" stroke-width="3.5" stroke-linecap="round"/>
+    
+    <!-- Second S (intertwined) -->
+    <path d="M36 16 C32 16 29 18 29 22 C29 26 32 28 36 28 C39 28 42 30 42 33 C42 36 39 38 36 38"
+          fill="none" stroke="url(#accent)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"/>
+
+    <!-- Minimal dot accent -->
+    <circle cx="44" cy="14" r="1.5" fill="url(#primary)" opacity="0.6"/>
+  </g>
+
+  <!-- Wordmark: Swami Sharanam -->
+  <g transform="translate(66, 0)">
+    <!-- "Swami" -->
+    <text x="0" y="32" font-family="'Inter', -apple-system, 'Segoe UI', Roboto, sans-serif"
+          font-size="22" font-weight="800" letter-spacing="-0.5"
+          fill="#0f172a">
+      <tspan>Swami</tspan>
+    </text>
+    
+    <!-- "Sharanam" -->
+    <text x="0" y="58" font-family="'Inter', -apple-system, 'Segoe UI', Roboto, sans-serif"
+          font-size="22" font-weight="800" letter-spacing="-0.5"
+          fill="#2563eb">
+      <tspan>Sharanam</tspan>
+    </text>
+
+    <!-- Tagline: Distribution Hub -->
+    <text x="0" y="72" font-family="'Inter', -apple-system, 'Segoe UI', Roboto, sans-serif"
+          font-size="8" font-weight="700" letter-spacing="3.5"
+          fill="#94a3b8" text-transform="uppercase">
+      <tspan>Distribution Hub</tspan>
+    </text>
+  </g>
+</svg>
+

@@ -72,7 +72,7 @@ export default function SignupPage() {
           <div className="absolute -right-10 bottom-0 h-96 w-96 animate-pulse rounded-full bg-blue-400 blur-3xl delay-700"></div>
         </div>
         <div className="relative z-10 px-12 text-center">
-          <img src="/logo.png" alt="Swami Sharanam" className="mx-auto mb-8 h-32 w-auto drop-shadow-2xl" />
+          <img src="/logo.svg" alt="Swami Sharanam" className="mx-auto mb-8 h-32 w-auto drop-shadow-2xl" />
           <h1 className="mb-6 text-6xl font-black tracking-tighter text-white">Swami Sharanam</h1>
           <p className="mx-auto max-w-md text-xl font-medium leading-relaxed text-slate-300">
             The next generation of sales distribution, collections, and field execution management.

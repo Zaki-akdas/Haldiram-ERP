@@ -40,7 +40,7 @@ export default function Sidebar({ isOpen, onClose }: { isOpen: boolean; onClose:
         <div className="flex h-full flex-col">
           <div className="p-7 pb-4">
             <div className="mb-3 flex items-center gap-3 rounded-2xl border border-slate-800 bg-slate-900/70 px-3 py-3">
-              <img src="/logo.png" alt="Swami Sharanam" className="h-10 w-auto" />
+              <img src="/logo-icon.svg" alt="Swami Sharanam" className="h-10 w-auto" />
             </div>
             <p className="mt-2 border-t border-slate-800 pt-2 text-[9px] font-black uppercase tracking-[0.24em] text-slate-400">Distribution Hub</p>
           </div>
