@@ -18,6 +18,11 @@ interface Totals {
   taxableAmount: number; cgst: number; sgst: number; igst: number;
   totalGst: number; grandTotal: number; roundOff: number;
   amountInWords: string;
+  bankName: string;
+  bankAccountNumber: string;
+  bankIfscCode: string;
+  vehicleNumber: string;
+  additionalTerms: string;
 }
 interface ExtractedData {
   seller?: Seller; buyer?: Buyer; invoice?: InvMeta;
@@ -488,6 +493,35 @@ export default function BillsPage() {
                       <p className="text-lg font-black mt-2">Qty: {extracted.totals.totalQty}</p>
                     </div>
                   </div>
+                </div>
+              )}
+
+              {/* Bank & Transport Details */}
+              {(extracted.totals?.bankName || extracted.totals?.vehicleNumber || extracted.totals?.bankIfscCode) && (
+                <div className="bg-slate-50 dark:bg-slate-700/30 rounded-lg p-4 border border-slate-200 dark:border-slate-700">
+                  <h4 className="text-[10px] font-bold text-slate-400 uppercase mb-3">🏦 Bank & Transport</h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                    {extracted.totals?.bankName && (
+                      <div><span className="text-slate-400">Bank:</span> <span className="font-medium text-slate-800 dark:text-white">{extracted.totals.bankName}</span></div>
+                    )}
+                    {extracted.totals?.bankAccountNumber && (
+                      <div><span className="text-slate-400">Account:</span> <span className="font-mono font-medium text-slate-800 dark:text-white">{extracted.totals.bankAccountNumber}</span></div>
+                    )}
+                    {extracted.totals?.bankIfscCode && (
+                      <div><span className="text-slate-400">IFSC:</span> <span className="font-mono font-medium text-slate-800 dark:text-white">{extracted.totals.bankIfscCode}</span></div>
+                    )}
+                    {extracted.totals?.vehicleNumber && (
+                      <div><span className="text-slate-400">Vehicle:</span> <span className="font-mono font-medium text-slate-800 dark:text-white">{extracted.totals.vehicleNumber}</span></div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Additional Terms */}
+              {extracted.totals?.additionalTerms && (
+                <div className="bg-slate-50 dark:bg-slate-700/30 rounded-lg p-4 border border-slate-200 dark:border-slate-700">
+                  <h4 className="text-[10px] font-bold text-slate-400 uppercase mb-2">📋 Additional Information</h4>
+                  <p className="text-sm text-slate-700 dark:text-slate-300">{extracted.totals.additionalTerms}</p>
                 </div>
               )}
 

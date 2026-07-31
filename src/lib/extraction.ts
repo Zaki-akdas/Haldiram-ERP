@@ -46,6 +46,12 @@ export interface ExtractedInvoice {
     totalGst: number;
     grandTotal: number;
     amountInWords: string;
+    roundOff: number;
+    bankName: string;
+    bankAccountNumber: string;
+    bankIfscCode: string;
+    vehicleNumber: string;
+    additionalTerms: string;
   };
   metadata: {
     fileType: string;
@@ -189,6 +195,12 @@ export function extractFromText(text: string): Partial<ExtractedInvoice> {
       totalGst: 0,
       grandTotal: 0,
       amountInWords: '',
+      roundOff: 0,
+      bankName: '',
+      bankAccountNumber: '',
+      bankIfscCode: '',
+      vehicleNumber: '',
+      additionalTerms: '',
     },
     metadata: {
       fileType: 'text',

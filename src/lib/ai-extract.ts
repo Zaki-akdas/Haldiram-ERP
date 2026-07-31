@@ -39,11 +39,11 @@ export const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.2:3b';
 export const OLLAMA_TIMEOUT = parseInt(process.env.OLLAMA_TIMEOUT || '60000', 10);
 
 const SYSTEM_PROMPT = `You are an expert invoice data extractor for Indian tax invoices. Extract structured data from invoice/bill/document text and return ONLY valid JSON.
-
+ 
 Output schema:
 {
-  "seller": { "name": "", "address": "", "gstin": "", "pan": "", "fssai": "", "phone": "" },
-  "buyer": { "name": "", "address": "", "phone": "", "gstin": "" },
+  "seller": { "name": "", "address": "", "gstin": "", "pan": "", "fssai": "", "phone": "", "email": "" },
+  "buyer": { "name": "", "address": "", "phone": "", "gstin": "", "fssai": "" },
   "invoice": { "number": "", "date": "", "salesman": "", "beat": "", "employeeContact": "" },
   "items": [
     {
@@ -56,7 +56,9 @@ Output schema:
   "totals": {
     "totalQty": 0, "subtotal": 0, "discount": 0, "taxableAmount": 0,
     "cgst": 0, "sgst": 0, "igst": 0, "totalGst": 0, "grandTotal": 0,
-    "roundOff": 0, "amountInWords": ""
+    "roundOff": 0, "amountInWords": "",
+    "bankName": "", "bankAccountNumber": "", "bankIfscCode": "",
+    "vehicleNumber": "", "additionalTerms": ""
   }
 }
 
@@ -71,7 +73,10 @@ Rules:
 - Phone numbers: extract 10-digit Indian numbers starting with 6-9.
 - GSTIN: 15 character alphanumeric like 23AFOFS4394E1ZP.
 - PAN: 10 character like AFOFS4394E.
-- Product names: extract FULL product names including sizes like "BANSAL OIL 750", "MAIDA 30 KG", etc. Do NOT truncate at numbers.`;
+- Product names: extract FULL product names including sizes like "BANSAL OIL 750", "MAIDA 30 KG", etc. Do NOT truncate at numbers.
+- Bank details: extract Bank Name, Bank Account Number, and IFSC Code if present in the invoice.
+- Vehicle Number: extract the vehicle/truck number used for transport if present.
+- Additional Terms: extract any "Additional Information", "Terms & Conditions", or "Payment Terms" text if present.`;
 
 export async function callOllama(text: string): Promise<any> {
   const controller = new AbortController();
@@ -178,6 +183,11 @@ export function normalizeExtraction(raw: any): any {
     grandTotal: toNumber(raw?.totals?.grandTotal),
     roundOff: toNumber(raw?.totals?.roundOff),
     amountInWords: String(raw?.totals?.amountInWords || '').trim(),
+    bankName: String(raw?.totals?.bankName || '').trim(),
+    bankAccountNumber: String(raw?.totals?.bankAccountNumber || '').trim(),
+    bankIfscCode: String(raw?.totals?.bankIfscCode || '').trim(),
+    vehicleNumber: String(raw?.totals?.vehicleNumber || '').trim(),
+    additionalTerms: String(raw?.totals?.additionalTerms || '').trim(),
   };
 
   return {

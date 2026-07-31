@@ -18,6 +18,11 @@ interface Totals {
   taxableAmount: number; cgst: number; sgst: number; igst: number;
   totalGst: number; grandTotal: number; roundOff: number;
   amountInWords: string;
+  bankName: string;
+  bankAccountNumber: string;
+  bankIfscCode: string;
+  vehicleNumber: string;
+  additionalTerms: string;
 }
 interface Extracted {
   seller?: Seller; buyer?: Buyer; invoice?: InvMeta;
@@ -639,14 +644,43 @@ export default function InvoicesPage() {
                         <span className="text-lg font-bold text-emerald-800 dark:text-emerald-300">Grand Total</span>
                         <span className="text-3xl font-bold text-emerald-700 dark:text-emerald-300">{INR(extracted.totals.grandTotal)}</span>
                       </div>
-                      {extracted.totals.amountInWords && (
-                        <p className="mt-2 text-xs italic text-emerald-600 dark:text-emerald-400">{extracted.totals.amountInWords}</p>
-                      )}
-                    </div>
-                  </div>
-                )}
+{extracted.totals.amountInWords && (
+                         <p className="mt-2 text-xs italic text-emerald-600 dark:text-emerald-400">{extracted.totals.amountInWords}</p>
+                       )}
+                     </div>
+                   </div>
+                 )}
 
-                {/* Actions */}
+                 {/* Bank & Transport Details */}
+                 {(extracted.totals?.bankName || extracted.totals?.vehicleNumber || extracted.totals?.bankIfscCode) && (
+                   <div className="bg-slate-50 dark:bg-slate-700/30 rounded-lg p-4 border border-slate-200 dark:border-slate-700">
+                     <h4 className="text-[10px] font-bold text-slate-400 uppercase mb-3">🏦 Bank & Transport</h4>
+                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                       {extracted.totals?.bankName && (
+                         <div><span className="text-slate-400">Bank:</span> <span className="font-medium text-slate-800 dark:text-white">{extracted.totals.bankName}</span></div>
+                       )}
+                       {extracted.totals?.bankAccountNumber && (
+                         <div><span className="text-slate-400">Account:</span> <span className="font-mono font-medium text-slate-800 dark:text-white">{extracted.totals.bankAccountNumber}</span></div>
+                       )}
+                       {extracted.totals?.bankIfscCode && (
+                         <div><span className="text-slate-400">IFSC:</span> <span className="font-mono font-medium text-slate-800 dark:text-white">{extracted.totals.bankIfscCode}</span></div>
+                       )}
+                       {extracted.totals?.vehicleNumber && (
+                         <div><span className="text-slate-400">Vehicle:</span> <span className="font-mono font-medium text-slate-800 dark:text-white">{extracted.totals.vehicleNumber}</span></div>
+                       )}
+                     </div>
+                   </div>
+                 )}
+
+                 {/* Additional Terms */}
+                 {extracted.totals?.additionalTerms && (
+                   <div className="bg-slate-50 dark:bg-slate-700/30 rounded-lg p-4 border border-slate-200 dark:border-slate-700">
+                     <h4 className="text-[10px] font-bold text-slate-400 uppercase mb-2">📋 Additional Information</h4>
+                     <p className="text-sm text-slate-700 dark:text-slate-300">{extracted.totals.additionalTerms}</p>
+                   </div>
+                 )}
+
+                 {/* Actions */}
                 <div className="flex gap-3 pt-2">
                   <button onClick={handleImport} disabled={importing} className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-semibold disabled:opacity-50 flex items-center justify-center gap-2">
                     {importing ? (

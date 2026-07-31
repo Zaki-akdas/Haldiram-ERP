@@ -35,6 +35,11 @@ interface ExtractedTotals {
   taxableAmount: number; cgst: number; sgst: number; igst: number;
   totalGst: number; grandTotal: number; roundOff: number;
   amountInWords: string;
+  bankName: string;
+  bankAccountNumber: string;
+  bankIfscCode: string;
+  vehicleNumber: string;
+  additionalTerms: string;
 }
 
 interface FullExtraction {
@@ -76,6 +81,8 @@ function extractAll(text: string): FullExtraction {
     totalQty: 0, subtotal: 0, discount: 0, taxableAmount: 0,
     cgst: 0, sgst: 0, igst: 0, totalGst: 0, grandTotal: 0,
     roundOff: 0, amountInWords: '',
+    bankName: '', bankAccountNumber: '', bankIfscCode: '',
+    vehicleNumber: '', additionalTerms: '',
   };
 
   // ── 0. Specialized CSV-style Format Detection ──
@@ -639,6 +646,23 @@ function extractAll(text: string): FullExtraction {
   const wordsM = full.match(/(?:Amount\s*in\s*Words|In\s*Words|Rupees)[:\s]*([\w\s,]+(?:Rupees?|Only)[\w\s,]*Only)/i)
     || full.match(/([\w\s]+Rupees?[\w\s]+Only)/i);
   if (wordsM) totals.amountInWords = clean(wordsM[1]);
+
+  // ── Bank & Transportation Details ──
+  const bankNameM = full.match(/(?:Bank\s*(?:Name)?|Bank Name)[:\s]*([A-Za-z][A-Za-z\s&.]{2,60})/i);
+  if (bankNameM) totals.bankName = clean(bankNameM[1]).replace(/\n.*/, '');
+
+  const bankAcctM = full.match(/(?:Bank\s*(?:Account|Acct)?\s*(?:Number|No)?|Account\s*(?:Number|No))[:\s]*([\d\s\-]{10,20})/i);
+  if (bankAcctM) totals.bankAccountNumber = clean(bankAcctM[1]);
+
+  const bankIfscM = full.match(/(?:IFSC|IFSC\s*Code|IFSC\s*Code\s*Number|Bank\s*IFSC)[:\s]*([A-Z]{4}[0A-Z][A-Z0-9]{6})/i);
+  if (bankIfscM) totals.bankIfscCode = clean(bankIfscM[1]);
+
+  const vehicleM = full.match(/(?:Vehicle\s*(?:Number|No\.?|#)?|Transport\s*(?:Vehicle|Vechicle)|Veh\s*(?:Number|No\.?))[:\s]*([A-Z0-9]{2,15})/i);
+  if (vehicleM) totals.vehicleNumber = clean(vehicleM[1]);
+
+  // ── Additional Information & Terms ──
+  const termsM = full.match(/(?:Additional\s*Information|Terms\s*(?:and\s*)?Conditions|Payment\s*(?:Terms|Conditions)|Credit\s*(?:Terms|Days))[:\s]*(.+)/i);
+  if (termsM) totals.additionalTerms = clean(termsM[1]).replace(/\n.*/, '');
 
   // Derive missing totals
   if (!totals.totalGst && (totals.cgst || totals.sgst)) {
