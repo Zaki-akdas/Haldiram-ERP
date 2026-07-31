@@ -390,20 +390,21 @@ function extractAll(text: string): FullExtraction {
       const erpId = leadMatch[2];
       const rest = leadMatch[3];
 
-      // Strategy: Find description (alphabetic text), then collect all numbers.
-      // Description ends where the first HSN code or purely numeric token begins.
-      // Split into tokens by whitespace
+      // Strategy: Find description (text tokens), then collect all pure numbers.
+      // Description ends where the first PURELY numeric token begins (e.g., HSN code, qty).
+      // Tokens that are alphanumeric (like "200G" or "500ML") are part of the product name.
       const tokens = rest.split(/\s+/);
       let description = '';
       const numericTokens: string[] = [];
-      let foundFirstNum = false;
+      let foundFirstPureNum = false;
 
       for (const tok of tokens) {
-        if (!foundFirstNum && /^[A-Za-z]/.test(tok)) {
+        const isPureNumber = /^-?[\d,]+\.?\d*$/.test(tok);
+        if (!foundFirstPureNum && !isPureNumber) {
           description += (description ? ' ' : '') + tok;
         } else {
-          foundFirstNum = true;
-          if (/^-?[\d,]+\.?\d*$/.test(tok)) {
+          foundFirstPureNum = true;
+          if (isPureNumber) {
             numericTokens.push(tok);
           }
         }
@@ -489,7 +490,16 @@ function extractAll(text: string): FullExtraction {
             }
             
             if (qtyIdx >= 0) {
-              description = clean(rest.substring(0, numMatches[qtyIdx].index));
+              // Find description: everything before the first PURELY numeric token from the end
+              // (not just any number, since product names can contain numbers like "200G")
+              let descEnd = rest.length;
+              for (let k = qtyIdx; k >= 0; k--) {
+                if (numMatches[k].index !== undefined) {
+                  descEnd = numMatches[k].index;
+                  break;
+                }
+              }
+              description = clean(rest.substring(0, descEnd));
               qty = numMatches[qtyIdx].value;
               rate = numMatches.length > qtyIdx + 1 ? numMatches[qtyIdx + 1].value : 0;
               
@@ -502,16 +512,18 @@ function extractAll(text: string): FullExtraction {
               }
             } else {
               const n = numMatches.map(m => m.value);
-              const firstNumPos = rest.search(/\s\d/);
-              description = firstNumPos > 0 ? clean(rest.substring(0, firstNumPos)) : '';
+              // Find first purely numeric token position for description cutoff
+              const firstNumMatch = rest.match(/(?:\s|^)(\d[\d,.]*\.\d{1,2}|\d[\d,]*)(?=\s|$)/);
+              description = firstNumMatch ? clean(rest.substring(0, firstNumMatch.index)) : clean(rest);
               qty = n[0] || 0;
               rate = n.length > 1 ? n[1] : 0;
               total = n[n.length - 1] || 0;
             }
           } else {
-            const firstNumPos = rest.search(/\s\d/);
-            description = firstNumPos > 0 ? clean(rest.substring(0, firstNumPos)) : '';
             const n = numMatches.map(m => m.value);
+            // Find first purely numeric token position for description cutoff
+            const firstNumMatch = rest.match(/(?:\s|^)(\d[\d,.]*\.\d{1,2}|\d[\d,]*)(?=\s|$)/);
+            description = firstNumMatch ? clean(rest.substring(0, firstNumMatch.index)) : clean(rest);
             qty = n[0] || 0;
             rate = n.length > 1 ? n[1] : 0;
             total = n[n.length - 1] || 0;

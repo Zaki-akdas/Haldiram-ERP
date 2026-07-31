@@ -514,11 +514,12 @@ function parseInvoiceLines(text: string): CsvItem[] {
 
       if (!hsn) {
         for (const tok of rest.split(/\s+/)) {
-          if (!foundFirstNum && /^[A-Za-z]/.test(tok)) {
+          const isPureNumber = /^-?[\d,]+\.?\d*$/.test(tok);
+          if (!foundFirstNum && !isPureNumber) {
             description += (description ? ' ' : '') + tok;
           } else {
             foundFirstNum = true;
-            if (/^-?[\d,]+\.?\d*$/.test(tok)) {
+            if (isPureNumber) {
               numericTokens.push(tok);
             }
           }
@@ -557,8 +558,15 @@ function parseInvoiceLines(text: string): CsvItem[] {
         const rest = simpleMatch[2];
         const allNums = [...rest.matchAll(/(?<=\s)([\d,]+\.?\d*)(?=\s|$)/g)].map(m => num(m[1]));
         if (allNums.length >= 2) {
-          const firstNumPos = rest.search(/\s\d/);
-          const description = firstNumPos > 0 ? clean(rest.substring(0, firstNumPos)) : '';
+          let description = '';
+          const numIndices: number[] = [];
+          for (const m of rest.matchAll(/(?<=\s)([\d,]+\.?\d*)(?=\s|$)/g)) {
+            if (m.index !== undefined) numIndices.push(m.index);
+          }
+          if (numIndices.length > 0) {
+            const descStart = numIndices[0];
+            description = clean(rest.substring(0, descStart));
+          }
           const n = allNums.length;
           const total = allNums[n - 1] || 0;
 
