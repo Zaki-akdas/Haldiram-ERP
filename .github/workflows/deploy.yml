@@ -1,0 +1,46 @@
+name: Deploy to Vercel
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+  VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+jobs:
+  deploy:
+    name: Deploy to Vercel (Production)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
+      - name: Pull Vercel project settings
+        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Deploy to Vercel (Production)
+        run: vercel --prod --yes --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Verify deployment is live
+        run: |
+          base="https://haldiram-erp.vercel.app"
+          for i in $(seq 1 12); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "$base/" || true)
+            health=$(curl -s "$base/api/health" || true)
+            echo "attempt $i: home=$code health=${health:0:60}"
+            if [ "$code" = "200" ] && echo "$health" | grep -q '"ok":true'; then
+              echo "Deployment verified live"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Deployment verification failed"
+          exit 1
