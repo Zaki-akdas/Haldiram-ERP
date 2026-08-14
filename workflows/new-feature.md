@@ -1,12 +1,17 @@
-# New Feature
-
-Test-first: writer → fixer → runner → browser QA
+---
+name: New Feature
+description: Test-first feature development workflow
+---
 
 ## Agents
-- test-writer
-- code-fixer
-- test-runner
-- browser-qa-agent
+1. **test-writer**: Write tests for the new feature
+2. **code-writer**: Implement the feature to pass tests
+3. **test-runner**: Run test suite
+4. **browser-qa**: Visual QA in browser
 
-## Execution
-Run the agents in sequence (or parallel where noted). Collect all outputs in `.claude/audits/`.
+## Steps
+1. test-writer creates comprehensive tests for the feature
+2. code-writer implements the feature
+3. test-runner verifies all tests pass
+4. browser-qa checks visual appearance and interactions
+5. If issues found, return to step 2

@@ -40,4 +40,9 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-.vercel
+# local tooling / agent state (not project code)
+.freebuff/
+.kilo/
+.agent/
+.agents/
+.claude-strategies.json

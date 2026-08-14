@@ -1,10 +1,13 @@
-# Pre-Commit
-
-Quick code + test check before commit
+---
+name: Pre-Commit
+description: Pre-commit quality checks
+---
 
 ## Agents
-- code-auditor
-- test-runner
+1. **code-auditor**: Review changed files for issues
+2. **test-runner**: Run affected tests
 
-## Execution
-Run the agents in sequence (or parallel where noted). Collect all outputs in `.claude/audits/`.
+## Steps
+1. code-auditor reviews all staged changes
+2. test-runner runs tests related to changed files
+3. Report results with pass/fail status
