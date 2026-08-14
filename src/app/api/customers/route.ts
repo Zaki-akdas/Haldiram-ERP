@@ -1,70 +1,88 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseAdmin } from '@/db';
 import { getCurrentUser } from '@/lib/auth';
+import { db } from '@/db';
+import { customers, users, activityLogs } from '@/db/schema';
+import { eq, like, and, or, count } from 'drizzle-orm';
 
-export const dynamic = 'force-dynamic';
-
-export async function GET(request: NextRequest) {
+export async function GET(req: NextRequest) {
   try {
-    const supabase = getSupabaseAdmin();
     const user = await getCurrentUser();
-    if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const { searchParams } = new URL(request.url);
-    const search = searchParams.get('search') || '';
-    const page = parseInt(searchParams.get('page') || '1', 10);
-    const limit = parseInt(searchParams.get('limit') || '20', 10);
+    const searchParams = req.nextUrl.searchParams;
+    const page = parseInt(searchParams.get('page') || '1');
+    const limit = parseInt(searchParams.get('limit') || '20');
+    const search = searchParams.get('search');
+    const salespersonId = searchParams.get('salespersonId');
+
     const offset = (page - 1) * limit;
-    const isAdmin = user.role === 'admin';
 
-    let query = supabase
-      .from('customers')
-      .select('*', { count: 'exact' });
+    const conditions = [];
 
-    if (!isAdmin) {
-      query = query.eq('assigned_salesperson_id', user.id);
+    if (user.role === 'salesperson') {
+      conditions.push(eq(customers.assignedSalespersonId, user.id));
+    } else if (salespersonId) {
+      conditions.push(eq(customers.assignedSalespersonId, Number(salespersonId)));
     }
 
     if (search) {
-      query = query.or(`name.ilike.%${search}%,phone.ilike.%${search}%,gstin.ilike.%${search}%`);
+      conditions.push(
+        or(
+          like(customers.name, `%${search}%`),
+          like(customers.phone, `%${search}%`),
+          like(customers.email, `%${search}%`),
+          like(customers.city, `%${search}%`)
+        )
+      );
     }
 
-    const { data: customerList, count, error } = await query
-      .order('created_at', { ascending: false })
-      .range(offset, offset + limit - 1);
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
-    if (error) throw error;
+    const [{ total }] = await db
+      .select({ total: count() })
+      .from(customers)
+      .where(whereClause);
 
-    const formattedCustomers = (customerList || []).map((c: any) => ({
+    const rows = await db
+      .select()
+      .from(customers)
+      .leftJoin(users, eq(customers.assignedSalespersonId, users.id))
+      .where(whereClause)
+      .limit(limit)
+      .offset(offset)
+      .orderBy(customers.name);
+
+    const data = rows.map(({ customers: c, users: sp }) => ({
       ...c,
-      salespersonName: null,
-      creditLimit: Number(c.credit_limit || 0),
-      outstandingBalance: Number(c.outstanding_balance || 0),
+      outstanding: c.outstandingBalance,
+      salespersonName: sp?.name || null,
     }));
 
     return NextResponse.json({
-      customers: formattedCustomers,
-      pagination: {
-        page,
-        limit,
-        total: count || 0,
-        totalPages: Math.ceil((count || 0) / limit),
-      },
+      customers: data,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit)
     });
   } catch (error) {
-    console.error('Customers fetch error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: (error as Error).message }, { status: 500 });
   }
 }
 
-export async function POST(request: NextRequest) {
+export async function POST(req: NextRequest) {
   try {
-    const supabase = getSupabaseAdmin();
     const user = await getCurrentUser();
-    if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const body = await request.json();
-    const {
+    const body = await req.json();
+    const { name, phone, email, gstin, pan, address, city, state, pincode, beat, creditLimit, assignedSalespersonId } = body;
+
+    if (!name) {
+      return NextResponse.json({ error: 'Name is required' }, { status: 400 });
+    }
+
+    const [newCustomer] = await db.insert(customers).values({
       name,
       phone,
       email,
@@ -72,43 +90,45 @@ export async function POST(request: NextRequest) {
       pan,
       address,
       city,
+      state,
+      pincode,
       beat,
-      creditLimit,
-      assignedSalespersonId,
-    } = body;
+      creditLimit: creditLimit ? creditLimit.toString() : null,
+      assignedSalespersonId
+    }).returning();
 
-    if (!name) return NextResponse.json({ error: 'Customer name is required' }, { status: 400 });
-
-    const { data: newCustomer, error } = await supabase
-      .from('customers')
-      .insert({
-        name,
-        phone,
-        email,
-        gstin,
-        pan,
-        address,
-        city,
-        beat,
-        credit_limit: creditLimit?.toString() || '0',
-        assigned_salesperson_id: assignedSalespersonId || (user.role === 'salesperson' ? user.id : null),
-      })
-      .select()
-      .single();
-
-    if (error) throw error;
-
-    await supabase.from('activity_logs').insert({
-      user_id: user.id,
-      activity_type: 'customer_added',
-      entity_type: 'customer',
-      entity_id: newCustomer.id,
-      description: `Added customer ${name}`,
+    await db.insert(activityLogs).values({
+      userId: user.id,
+      activityType: 'customer_added',
+      entityType: 'customer',
+      entityId: newCustomer.id,
+      description: `Customer ${name} added`
     });
 
-    return NextResponse.json({ customer: newCustomer }, { status: 201 });
+    return NextResponse.json(newCustomer, { status: 201 });
   } catch (error) {
-    console.error('Customer create error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: (error as Error).message }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const user = await getCurrentUser();
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+    const body = await req.json();
+    const ids: number[] = Array.isArray(body?.ids) ? body.ids.map(Number) : (body?.id ? [Number(body.id)] : []);
+
+    if (ids.length === 0) {
+      return NextResponse.json({ error: 'No customer IDs provided' }, { status: 400 });
+    }
+
+    for (const id of ids) {
+      await db.delete(customers).where(eq(customers.id, id));
+    }
+
+    return NextResponse.json({ success: true, count: ids.length });
+  } catch (error) {
+    return NextResponse.json({ error: (error as Error).message }, { status: 500 });
   }
 }

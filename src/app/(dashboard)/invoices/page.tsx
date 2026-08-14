@@ -1,702 +1,530 @@
 'use client';
 
-import { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef } from 'react';
 import { useAuth } from '@/components/AuthProvider';
+import { useRouter } from 'next/navigation';
 
-/* ─── Types ─── */
-interface Seller { name: string; gstin: string; pan: string; fssai: string; phone: string; address: string }
-interface Buyer { name: string; phone: string; address: string; gstin?: string }
-interface InvMeta { number: string; date: string; salesman: string; beat: string; employeeContact: string }
-interface Item {
-  sno: number; erpId: string; description: string; hsn: string;
-  quantity: number; freeQty: number; unit: string; mrp: number;
-  rate: number; discount: number; taxable: number; gstRate: number;
-  cgst: number; sgst: number; gst: number; total: number;
+interface ExtractedItem {
+  srNo?: number;
+  erpId?: string;
+  productName: string;
+  hsnCode?: string;
+  quantity: number;
+  unitPrice: number;
+  taxableAmount: number;
+  gstRate: number;
+  gstAmount: number;
+  totalAmount: number;
 }
-interface Totals {
-  totalQty: number; subtotal: number; discount: number;
-  taxableAmount: number; cgst: number; sgst: number; igst: number;
-  totalGst: number; grandTotal: number; roundOff: number;
-  amountInWords: string;
-  bankName: string;
-  bankAccountNumber: string;
-  bankIfscCode: string;
-  vehicleNumber: string;
-  additionalTerms: string;
-}
-interface Extracted {
-  seller?: Seller; buyer?: Buyer; invoice?: InvMeta;
-  items?: Item[]; totals?: Totals;
-  metadata?: { extractionConfidence: number; fileType: string; rawTextLength: number };
-}
-interface Validation { passed: string[]; warnings: string[]; errors: string[]; score: number }
-interface Rec { format: string; confidence: number; reason: string; tips: string[] }
 
-const INR = (n: number) => n ? `₹${n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—';
-
-const FILE_TYPES: Record<string, { icon: string; label: string; color: string }> = {
-  pdf: { icon: '📄', label: 'PDF', color: 'text-red-500' },
-  excel: { icon: '📊', label: 'Excel', color: 'text-emerald-600' },
-  xlsx: { icon: '📊', label: 'Excel', color: 'text-emerald-600' },
-  xls: { icon: '📊', label: 'Excel', color: 'text-emerald-600' },
-  csv: { icon: '📋', label: 'CSV', color: 'text-blue-500' },
-  txt: { icon: '📝', label: 'Text', color: 'text-slate-500' },
-  text: { icon: '📝', label: 'Text', color: 'text-slate-500' },
-};
-
-function getFileInfo(file: File) {
-  const ext = file.name.split('.').pop()?.toLowerCase() || '';
-  return FILE_TYPES[ext] || { icon: '📎', label: ext.toUpperCase(), color: 'text-slate-500' };
+interface UniversalResult {
+  format: string;
+  header: {
+    invoiceNumber?: string;
+    invoiceDate?: string;
+    customerName?: string;
+    customerGSTIN?: string;
+    subtotal?: number;
+    taxableAmount?: number;
+    cgst?: number;
+    sgst?: number;
+    igst?: number;
+    totalGst?: number;
+    grandTotal?: number;
+  };
+  items: ExtractedItem[];
+  confidence: number;
+  warnings?: string[];
 }
 
 export default function InvoicesPage() {
   const { authFetch } = useAuth();
+  const router = useRouter();
+
+  const [inputTab, setInputTab] = useState<'paste' | 'file'>('paste');
+  const [pastedText, setPastedText] = useState('');
   const [file, setFile] = useState<File | null>(null);
-  const [textInput, setTextInput] = useState('');
-  const [extracting, setExtracting] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [extracted, setExtracted] = useState<Extracted | null>(null);
-  const [validation, setValidation] = useState<Validation | null>(null);
-  const [recommendation, setRecommendation] = useState<Rec | null>(null);
-  const [error, setError] = useState('');
-  const [tab, setTab] = useState<'upload' | 'paste'>('upload');
+  const [dragActive, setDragActive] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [mode, setMode] = useState<'fast' | 'ai'>('fast');
+  const [processing, setProcessing] = useState(false);
+  const [result, setResult] = useState<UniversalResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
-  const [invoiceId, setInvoiceId] = useState<number | null>(null);
-  const [mode, setMode] = useState<'regex' | 'ai'>('regex');
-  const [provider, setProvider] = useState<'ollama' | 'gemini' | 'azure' | 'bazaarlink'>('bazaarlink');
-  const [downloading, setDownloading] = useState(false);
-  const [editingCustomer, setEditingCustomer] = useState(false);
-  const [customerNameInput, setCustomerNameInput] = useState('');
-  const fileRef = useRef<HTMLInputElement>(null);
-  const abortRef = useRef<AbortController | null>(null);
+  const [successMsg, setSuccessMsg] = useState('');
 
-  const reset = () => {
-    setFile(null); setExtracted(null); setValidation(null); setRecommendation(null); setError(''); setInvoiceId(null); setMode('regex'); setProvider('bazaarlink'); setDownloading(false); setEditingCustomer(false); setCustomerNameInput('');
-    if (fileRef.current) fileRef.current.value = '';
+  const sampleInvoice = `Seller Firm Name: RAJSHREE SNACKS AND FOODS PRIVATE LIMITED
+GSTIN: 23AAPCR5371M1ZT
+Invoice/Bill Number: RS/26-27/1577
+Bill/Invoice Date: 22 Jul 2026
+
+Billed To: PRO SWAMI SHARNAM ENTERPRISES
+GSTIN: 23AMFPV5397L1ZB
+
+1 FD012600160691200D All In One MRP 5|16 GM*6.912 KG (NGP) 21069099 5.00 432 5 2160 4.0475 1,649.5488 0.00 (0) 8,247.74 5 412.38 8,660.12
+2 FD092104001240001D Aloo Bhujia 400 GM*12.40 KG 21069099 109.00 31 2 62 88.7261 2,594.8209 0.00 (0) 5,189.64 5 259.48 5,449.12
+
+Total Value: 2,73,345.00`;
+
+  const sampleTsv = `Item Code\tItem Name\tHSN\tMRP\tQty\tRate\tTaxable\tGST %\tTotal
+FD0126001\tAll In One 16GM\t21069099\t5.00\t2160\t4.0475\t8247.74\t5\t8660.12
+FD0921040\tAloo Bhujia 400GM\t21069099\t109.00\t62\t88.7261\t5189.64\t5\t5449.12
+FD0180003\tBoondi MRP 10\t21069099\t10.00\t432\t8.1400\t3317.41\t5\t3483.29`;
+
+  const handleDrag = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === 'dragenter' || e.type === 'dragover') setDragActive(true);
+    else if (e.type === 'dragleave') setDragActive(false);
   };
 
-  const handleFiles = (files: FileList | null) => {
-    const f = files?.[0];
-    if (f) {
-      const ext = f.name.split('.').pop()?.toLowerCase() || '';
-      const allowed = ['pdf', 'csv', 'tsv', 'txt', 'xlsx', 'xls'];
-      if (!allowed.includes(ext)) {
-        setError(`Unsupported file type ".${ext}". Please upload PDF, Excel, or CSV.`);
-        return;
-      }
-      setFile(f); setExtracted(null); setValidation(null); setRecommendation(null); setError('');
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      setFile(e.dataTransfer.files[0]);
     }
   };
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault(); e.stopPropagation();
-    handleFiles(e.dataTransfer.files);
-  }, []);
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      setFile(e.target.files[0]);
+    }
+  };
 
-  const handleExtract = async () => {
-    if (tab === 'upload' && !file) return;
-    if (tab === 'paste' && !textInput.trim()) return;
+  const formatCurrency = (amount: number = 0) => {
+    return Number(amount || 0).toLocaleString('en-IN', { style: 'currency', currency: 'INR' });
+  };
 
-    setExtracting(true); setProgress(0); setError('');
-    setExtracted(null); setValidation(null); setRecommendation(null);
-    abortRef.current = new AbortController();
-
-    const tick = setInterval(() => setProgress(p => Math.min(p + 5, 92)), 120);
+  const processExtraction = async () => {
+    setProcessing(true);
+    setError(null);
+    setResult(null);
+    setSuccessMsg('');
 
     try {
-      const fd = new FormData();
-      if (tab === 'upload' && file) fd.append('file', file);
-      else fd.append('textContent', textInput);
-
-      if (mode === 'ai') {
-        fd.append('provider', provider);
-      }
-
-      const token = typeof window !== 'undefined' ? localStorage.getItem('salessettle_token') : null;
-      const endpoint = mode === 'ai' ? '/api/ai/extract' : '/api/invoices/extract';
-      const res = await fetch(endpoint, {
-        method: 'POST', body: fd,
-        signal: abortRef.current.signal,
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({ error: 'Server error' }));
-        throw new Error(data.error || `Failed (${res.status})`);
-      }
-
-      const data = await res.json();
-
-      if (mode === 'ai' && (data.fallbackToRegex || data.aiError)) {
-        setError('AI extraction failed, falling back to regex...');
-        const fd2 = new FormData();
-        if (tab === 'upload' && file) fd2.append('file', file);
-        else fd2.append('textContent', textInput);
-        const res2 = await fetch('/api/invoices/extract', {
-          method: 'POST', body: fd2,
-          signal: abortRef.current.signal,
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
-        });
-        if (!res2.ok) {
-          const data2 = await res2.json().catch(() => ({ error: 'Fallback failed' }));
-          throw new Error(data2.error || 'Regex fallback failed');
+      if (inputTab === 'paste') {
+        if (!pastedText.trim()) {
+          throw new Error('Please paste invoice data or table text first.');
         }
-        const data2 = await res2.json();
-        setExtracted(data2.extracted);
-        setValidation(data2.validation);
-        setRecommendation(data2.recommendation);
-        setInvoiceId(data2.invoiceId || null);
-        setProgress(100);
+
+        const formData = new FormData();
+        formData.append('text', pastedText);
+        formData.append('fileName', 'Pasted Text');
+        formData.append('deploymentMode', 'cloud');
+
+        const res = await authFetch('/api/ingest', {
+          method: 'POST',
+          body: formData,
+        });
+
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Extraction failed');
+        setResult(data.result);
       } else {
-        setExtracted(data.extracted);
-        setValidation(data.validation);
-        setRecommendation(data.recommendation);
-        setInvoiceId(data.invoiceId || null);
-        setProgress(100);
+        if (!file) throw new Error('Please select a file to upload.');
+
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('deploymentMode', 'cloud');
+
+        const res = await authFetch('/api/ingest', {
+          method: 'POST',
+          body: formData
+        });
+
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'File extraction failed');
+        setResult(data.result);
       }
-    } catch (err) {
-      if (err instanceof Error && err.name === 'AbortError') setError('Extraction cancelled');
-      else setError(err instanceof Error ? err.message : 'Extraction failed');
-    } finally { clearInterval(tick); setExtracting(false); }
-  };
-
-  const handleDownload = async (targetFormat: 'csv' | 'copy-paste') => {
-    if (!file) return;
-    setDownloading(true);
-    setError('');
-
-    try {
-      const fd = new FormData();
-      fd.append('file', file);
-      fd.append('targetFormat', targetFormat);
-
-      const token = typeof window !== 'undefined' ? localStorage.getItem('salessettle_token') : null;
-      const res = await fetch('/api/convert', {
-        method: 'POST',
-        body: fd,
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: 'Conversion failed' }));
-        throw new Error(err.error || 'Conversion failed');
-      }
-
-      const data = await res.json();
-      const text = data.text || '';
-      const filename = data.filename || (targetFormat === 'csv' ? 'converted.csv' : 'converted.txt');
-      const blob = new Blob([text], { type: targetFormat === 'csv' ? 'text/csv;charset=utf-8' : 'text/plain;charset=utf-8' });
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      window.URL.revokeObjectURL(url);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Conversion failed');
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || 'Extraction failed. Please check format.');
     } finally {
-      setDownloading(false);
+      setProcessing(false);
     }
   };
 
-  const handleImport = async () => {
-    if (!extracted || !extracted.totals) {
-      setError('Extracted data is incomplete. Please ensure totals are visible.');
-      return;
-    }
-
+  const handleImportOrder = async () => {
+    if (!result) return;
     setImporting(true);
-    setError('');
+    setError(null);
 
     try {
-      const buyerName = extracted.buyer?.name || '';
+      // 1. Check or pick customer
+      const custRes = await authFetch('/api/customers?limit=1');
       let customerId: number | null = null;
 
-      try {
-        const custRes = await authFetch(`/api/customers?search=${encodeURIComponent(buyerName)}&limit=1`);
-        if (custRes.ok) {
-          const custData = await custRes.json();
-          if (custData.customers && custData.customers.length > 0) {
-            customerId = custData.customers[0].id;
-          }
+      if (custRes.ok) {
+        const custData = await custRes.json();
+        const customersList = Array.isArray(custData) ? custData : (custData.customers || []);
+        if (customersList.length > 0) {
+          customerId = Number(customersList[0].id);
         }
-      } catch (e) {
-        console.warn('Customer resolution failed, will attempt auto-create', e);
       }
 
-      const rawInvNo = extracted.invoice?.number || `B${Date.now().toString().slice(-8)}`;
-      const invNo = rawInvNo.replace(/[^\w\-\/]/g, '').trim();
-
-      const items = (extracted.items || []).map(it => ({
-        productName: String(it.description || 'Unknown Product').substring(0, 250),
-        erpId: String(it.erpId || '').substring(0, 50),
-        quantity: Math.max(1, Number(it.quantity) || 0),
-        unitPrice: Number(it.rate) || 0,
-        taxableAmount: Number(it.taxable) || 0,
-        gstAmount: Number(it.gst) || 0,
-        totalAmount: Number(it.total) || 0,
-        gstRate: Number(it.gstRate) || 0
-      }));
-
-      if (items.length === 0) {
-        items.push({
-          productName: 'Punched Bill Total',
-          erpId: 'PUNCHED',
-          quantity: 1,
-          unitPrice: Number(extracted.totals.taxableAmount) || Number(extracted.totals.grandTotal) || 0,
-          taxableAmount: Number(extracted.totals.taxableAmount) || Number(extracted.totals.grandTotal) || 0,
-          gstAmount: Number(extracted.totals.totalGst) || 0,
-          totalAmount: Number(extracted.totals.grandTotal) || 0,
-          gstRate: Number(extracted.totals.taxableAmount) > 0 ? (Number(extracted.totals.totalGst) / Number(extracted.totals.taxableAmount) * 100) : 5
+      // If no customer exists in DB, create one from extracted invoice details
+      if (!customerId) {
+        const newCustRes = await authFetch('/api/customers', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: result.header.customerName || 'PRO SWAMI (SHARNAM ENTERPRISES)',
+            gstin: result.header.customerGSTIN || '23AMFPV5397L1ZB',
+            city: 'Bhopal',
+            state: 'Madhya Pradesh',
+            creditLimit: 500000
+          })
         });
+        if (newCustRes.ok) {
+          const newCust = await newCustRes.json();
+          customerId = Number(newCust.id);
+        }
       }
 
-      const payload = {
-        invoiceNumber: invNo,
-        invoiceId: invoiceId,
-        customerId,
-        customerName: buyerName,
-        customerPhone: extracted.buyer?.phone || '',
-        customerEmail: '',
-        customerGstin: extracted.buyer?.gstin || '',
-        customerAddress: extracted.buyer?.address || '',
-        orderDate: new Date().toISOString(),
-        beat: (extracted.invoice?.beat || 'Field Entry').substring(0, 250),
-        notes: `Imported via Salesperson. Ref: ${file?.name || 'Text'}. Orig Date: ${extracted.invoice?.date || 'N/A'}`,
-        items: items
+      const orderPayload = {
+        customerId: customerId || 1,
+        invoiceNumber: result.header.invoiceNumber || `INV-${Date.now()}`,
+        status: 'confirmed',
+        subtotal: result.header.taxableAmount || result.header.subtotal || 0,
+        taxableAmount: result.header.taxableAmount || 0,
+        cgst: result.header.cgst || 0,
+        sgst: result.header.sgst || 0,
+        igst: result.header.igst || 0,
+        totalGst: result.header.totalGst || 0,
+        grandTotal: result.header.grandTotal || 0,
+        items: (result.items || []).map(item => ({
+          productName: item.productName,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          taxableAmount: item.taxableAmount,
+          gstRate: item.gstRate,
+          gstAmount: item.gstAmount,
+          totalAmount: item.totalAmount,
+          hsnCode: item.hsnCode,
+          erpId: item.erpId
+        })),
+        notes: `Imported from ${result.format || 'Invoice Extractor'}`
       };
 
       const res = await authFetch('/api/orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(orderPayload)
       });
 
-      const data = await res.json();
-
       if (res.ok) {
-        window.location.href = '/dashboard';
+        setSuccessMsg(`✅ Order ${orderPayload.invoiceNumber} created and saved successfully! Redirecting to orders...`);
+        setTimeout(() => router.push('/orders'), 1500);
       } else {
-        setError(data.error || 'The system could not save this bill. Please check if the Bill No already exists.');
+        const data = await res.json();
+        throw new Error(data.error || 'Failed to create order');
       }
-    } catch (err) {
-      setError('Connection error. Please check your internet and try again.');
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || 'Failed to import as sales order');
     } finally {
       setImporting(false);
     }
   };
 
-  const hasResults = !!(extracted && validation);
+  const downloadCSV = () => {
+    if (!result || !result.items) return;
+
+    const headers = ['S No', 'ERP ID', 'Product Name', 'HSN Code', 'Quantity', 'Unit Price', 'Taxable Amount', 'GST Rate %', 'GST Amount', 'Total Amount'];
+    const rows = result.items.map(item => [
+      item.srNo || '',
+      item.erpId || '',
+      `"${(item.productName || '').replace(/"/g, '""')}"`,
+      item.hsnCode || '',
+      item.quantity || 0,
+      item.unitPrice || 0,
+      item.taxableAmount || 0,
+      item.gstRate || 0,
+      item.gstAmount || 0,
+      item.totalAmount || 0
+    ]);
+
+    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+      link.download = `extracted_invoice_${result.header.invoiceNumber || 'data'}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const reset = () => {
+    setFile(null);
+    setPastedText('');
+    setResult(null);
+    setError(null);
+    setSuccessMsg('');
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
 
   return (
-    <div className="space-y-6 max-w-5xl mx-auto">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-slate-800 dark:text-white">📄 Document Upload &amp; Extraction</h1>
-        <p className="text-slate-500 dark:text-slate-400 mt-1">Upload PDF, Excel, or CSV invoices to extract structured data with AI-powered validation</p>
+    <div className="p-4 md:p-8 max-w-6xl mx-auto space-y-6">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div>
+          <h1 className="text-3xl font-bold text-slate-900 dark:text-white">Copy-Paste & Invoice Extractor</h1>
+          <p className="text-slate-500 dark:text-slate-400 mt-1">Universal bill parser: Paste text directly or upload PDF/Excel/CSV invoices</p>
+        </div>
+        <button
+          onClick={reset}
+          className="px-4 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-sm rounded-xl border border-slate-200 dark:border-slate-700 flex items-center gap-2 transition-all"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          Refresh Extractor
+        </button>
       </div>
 
-      {/* Supported Formats Banner */}
-      <div className="grid grid-cols-3 gap-3">
-        {[
-          { icon: '📄', name: 'PDF', desc: 'Tax invoices, bills', acc: '~85%', color: 'border-red-200 bg-red-50 dark:bg-red-900/10 dark:border-red-800' },
-          { icon: '📊', name: 'Excel (.xlsx)', desc: 'Spreadsheets, reports', acc: '~98%', color: 'border-emerald-200 bg-emerald-50 dark:bg-emerald-900/10 dark:border-emerald-800' },
-          { icon: '📋', name: 'CSV', desc: 'Comma-separated data', acc: '~95%', color: 'border-blue-200 bg-blue-50 dark:bg-blue-900/10 dark:border-blue-800' },
-        ].map(f => (
-          <div key={f.name} className={`border rounded-xl p-3 text-center ${f.color}`}>
-            <span className="text-2xl">{f.icon}</span>
-            <p className="font-semibold text-slate-800 dark:text-white text-sm mt-1">{f.name}</p>
-            <p className="text-xs text-slate-500">{f.desc}</p>
-            <p className="text-xs font-bold text-emerald-600 mt-1">Accuracy: {f.acc}</p>
-          </div>
-        ))}
+      {/* Input Mode Selector */}
+      <div className="flex border-b border-gray-200 dark:border-gray-700">
+        <button
+          onClick={() => { setInputTab('paste'); setError(null); }}
+          className={`py-3 px-6 font-semibold flex items-center gap-2 border-b-2 transition-colors ${
+            inputTab === 'paste'
+              ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400'
+              : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+          }`}
+        >
+          <span>📋</span> Copy-Paste Raw Text / TSV / CSV
+        </button>
+        <button
+          onClick={() => { setInputTab('file'); setError(null); }}
+          className={`py-3 px-6 font-semibold flex items-center gap-2 border-b-2 transition-colors ${
+            inputTab === 'file'
+              ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400'
+              : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+          }`}
+        >
+          <span>📄</span> Upload PDF / Image File
+        </button>
       </div>
 
-      {/* Upload Area */}
-      <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm overflow-hidden">
-        {/* Tabs */}
-        <div className="flex border-b border-slate-200 dark:border-slate-700">
-          {(['upload', 'paste'] as const).map(t => (
-            <button key={t} onClick={() => { setTab(t); reset(); }}
-              className={`flex-1 px-4 py-3 text-sm font-medium transition-colors ${tab === t
-                ? 'text-emerald-600 border-b-2 border-emerald-600 bg-emerald-50/50 dark:bg-emerald-900/10'
-                : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>
-              {t === 'upload' ? '📁 Upload Document' : '📝 Paste Text'}
-            </button>
-          ))}
-        </div>
-
-        {/* Mode toggle */}
-        <div className="flex border-b border-slate-200 dark:border-slate-700">
-          <button onClick={() => setMode('regex')}
-            className={`flex-1 px-4 py-2 text-xs font-bold transition-colors ${mode === 'regex'
-              ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50/30 dark:bg-blue-900/10'
-              : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}>
-            ⚡ Fast (Regex)
-          </button>
-          <button onClick={() => setMode('ai')}
-            className={`flex-1 px-4 py-2 text-xs font-bold transition-colors ${mode === 'ai'
-              ? 'text-purple-600 border-b-2 border-purple-600 bg-purple-50/30 dark:bg-purple-900/10'
-              : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}>
-            🤖 AI
-          </button>
-        </div>
-        {mode === 'ai' && (
-          <div className="px-5 py-2 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-700/30">
-             <label className="text-[10px] font-bold text-slate-400 uppercase mr-2">Provider</label>
-             <select value={provider} onChange={e => setProvider(e.target.value as any)} className="text-xs border border-slate-300 dark:border-slate-600 rounded px-2 py-1 bg-white dark:bg-slate-800 text-slate-800 dark:text-white">
-               <option value="ollama">Ollama</option>
-               <option value="gemini">Gemini</option>
-               <option value="azure">Azure OpenAI</option>
-               <option value="bazaarlink">BazaarLink</option>
-             </select>
-          </div>
-        )}
-
-        <div className="p-5">
-          {tab === 'upload' ? (
-            <>
-              <div onDrop={handleDrop} onDragOver={e => { e.preventDefault(); e.stopPropagation(); }}
-                onClick={() => fileRef.current?.click()}
-                className={`border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-all ${
-                  file ? 'border-emerald-400 bg-emerald-50/50 dark:bg-emerald-900/10' : 'border-slate-300 dark:border-slate-600 hover:border-emerald-400 hover:bg-slate-50 dark:hover:bg-slate-700/30'}`}>
-                <input ref={fileRef} type="file" accept=".pdf,.csv,.tsv,.txt,.xlsx,.xls" onChange={e => handleFiles(e.target.files)} className="hidden" />
-
-                {file ? (
-                  <div>
-                    <span className={`text-6xl ${getFileInfo(file).color}`}>{getFileInfo(file).icon}</span>
-                    <p className="mt-3 font-semibold text-lg text-slate-800 dark:text-white">{file.name}</p>
-                    <div className="flex items-center justify-center gap-3 mt-2 text-sm text-slate-500">
-                      <span>{(file.size / 1024).toFixed(1)} KB</span>
-                      <span>•</span>
-                      <span className={`font-medium ${getFileInfo(file).color}`}>{getFileInfo(file).label}</span>
-                    </div>
-                    <button onClick={e => { e.stopPropagation(); reset(); }}
-                      className="mt-3 text-xs text-red-500 hover:text-red-700 underline">Remove file</button>
-                  </div>
-                ) : (
-                  <div>
-                    <div className="flex justify-center gap-3 text-5xl">
-                      <span>📄</span><span>📊</span><span>📋</span>
-                    </div>
-                    <p className="mt-4 text-slate-700 dark:text-slate-300 font-medium">Drag &amp; drop your document here</p>
-                    <p className="text-slate-400 text-sm mt-1">or <span className="text-emerald-600 font-medium">browse files</span></p>
-                    <p className="text-xs text-slate-400 mt-3">Accepted: PDF, Excel (.xlsx/.xls), CSV, TXT</p>
-                  </div>
-                )}
-              </div>
-            </>
-          ) : (
-            <textarea value={textInput} onChange={e => setTextInput(e.target.value)} rows={12}
-              placeholder={`Paste invoice text here...\n\nExample:\nPRO SWAMI SHARNAM ENTERPRISES\nGSTIN: 23AMFPV5397L1ZB\nInvoice No: PSSE/26-27/15792\nDate: 18 Jul 2026\nBill To: Shri Sai Kirana\n\n1  FE089200180756601D  Swami Ghee  0405  24  180  165.00  3960.00  99.00  99.00  4158.00\n\nGrand Total: 13303.00`}
-              className="w-full px-4 py-3 border border-slate-300 dark:border-slate-600 rounded-xl bg-white dark:bg-slate-700 text-slate-800 dark:text-white font-mono text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none" />
-          )}
-
-          {/* Extract Button */}
-          <div className="mt-4 flex gap-3">
-            <button onClick={handleExtract}
-              disabled={extracting || (tab === 'upload' ? !file : !textInput.trim())}
-              className="flex-1 py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-semibold disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-base">
-              {extracting ? (
-                <><span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" /> Extracting...</>
-              ) : (
-                <>{mode === 'ai' ? '🤖 AI Extract' : '⚡ Extract Data'}</>
-              )}
-            </button>
-            {extracting && (
-              <button onClick={() => abortRef.current?.abort()}
-                className="px-6 py-3.5 bg-red-600 hover:bg-red-700 text-white rounded-xl font-medium">✕ Cancel</button>
-            )}
-          </div>
-
-          {file && hasResults && !extracting && (
-            <div className="mt-3 flex gap-3">
-              <button onClick={() => handleDownload('csv')} disabled={downloading}
-                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl font-bold text-sm transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
-                <span>📋</span> Download CSV
+      {/* TAB 1: COPY-PASTE MODE */}
+      {inputTab === 'paste' && (
+        <div className="space-y-4">
+          <div className="flex justify-between items-center flex-wrap gap-2">
+            <label className="block text-sm font-medium text-gray-300">
+              Paste Copy-Pasted Data (TSV from Excel, CSV, Raw Invoice text, WhatsApp format):
+            </label>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setPastedText(sampleInvoice)}
+                className="text-xs px-3 py-1.5 rounded bg-slate-800 text-indigo-300 hover:bg-slate-700 transition-colors"
+              >
+                Load Sample Invoice
               </button>
-              <button onClick={() => handleDownload('copy-paste')} disabled={downloading}
-                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl font-bold text-sm transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
-                <span>📝</span> Download Copy-Paste
+              <button
+                type="button"
+                onClick={() => setPastedText(sampleTsv)}
+                className="text-xs px-3 py-1.5 rounded bg-slate-800 text-indigo-300 hover:bg-slate-700 transition-colors"
+              >
+                Load Sample TSV
               </button>
             </div>
-          )}
+          </div>
 
-          {/* Progress */}
-          {(extracting || progress === 100) && (
-            <div className="mt-3">
-              <div className="h-2.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
-                <div className={`h-full rounded-full transition-all duration-300 ${progress === 100 ? 'bg-emerald-500' : 'bg-blue-500'}`}
-                  style={{ width: `${progress}%` }} />
-              </div>
-              <p className="text-xs text-slate-500 text-center mt-1">
-                {progress === 100 ? '✅ Extraction complete' : `${progress}% — Processing...`}
+          <textarea
+            rows={9}
+            className="w-full p-4 rounded-xl border border-gray-700 bg-slate-900 text-gray-100 font-mono text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+            placeholder="Paste raw invoice text, TSV from Excel, or CSV here..."
+            value={pastedText}
+            onChange={(e) => setPastedText(e.target.value)}
+          />
+
+          <div className="flex justify-between items-center">
+            <button
+              onClick={reset}
+              className="px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors"
+            >
+              Clear Text
+            </button>
+
+            <button
+              onClick={processExtraction}
+              disabled={processing || !pastedText.trim()}
+              className="btn-primary py-2.5 px-6 rounded-lg font-semibold flex items-center gap-2 disabled:opacity-50"
+            >
+              {processing ? '⚡ Extracting...' : '⚡ Extract Invoice Data'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 2: FILE UPLOAD MODE */}
+      {inputTab === 'file' && (
+        <div className="space-y-4">
+          <div
+            className={`glass-card border-2 border-dashed p-8 text-center transition-all cursor-pointer relative ${
+              dragActive ? 'border-indigo-500 bg-indigo-500/10' : 'border-gray-700 hover:border-indigo-500/50'
+            }`}
+            onDragEnter={handleDrag}
+            onDragOver={handleDrag}
+            onDragLeave={handleDrag}
+            onDrop={handleDrop}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <input
+              ref={fileInputRef}
+              type="file"
+              className="hidden"
+              onChange={handleFileChange}
+              accept=".pdf,.png,.jpg,.jpeg"
+            />
+            <div className="flex flex-col items-center">
+              <svg className="w-12 h-12 text-indigo-400 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
+              <h3 className="text-lg font-bold text-white mb-1">
+                {file ? file.name : 'Click or Drag & Drop PDF Invoice'}
+              </h3>
+              <p className="text-sm text-gray-400">
+                {file ? `${(file.size / 1024).toFixed(1)} KB` : 'Supports PDF Tax Invoices, JPG, PNG'}
               </p>
             </div>
-          )}
+          </div>
 
-          {error && <div className="mt-3 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 rounded-lg text-sm">{error}</div>}
+          <div className="flex justify-between items-center">
+            <button
+              onClick={reset}
+              className="px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors"
+            >
+              Reset
+            </button>
+
+            <button
+              onClick={processExtraction}
+              disabled={processing || !file}
+              className="btn-primary py-2.5 px-6 rounded-lg font-semibold flex items-center gap-2 disabled:opacity-50"
+            >
+              {processing ? 'Processing PDF...' : 'Extract PDF Invoice'}
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
-      {/* ─── Results ─── */}
-      {hasResults && (
-        <>
-          {/* Validation */}
-          {validation && (
-            <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-semibold text-slate-800 dark:text-white text-lg">✅ Validation Results</h3>
-                <div className={`px-4 py-1.5 rounded-full text-sm font-bold ${
-                  validation.score >= 75 ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
-                  : validation.score >= 50 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>
-                  {validation.score}% Score
-                </div>
+      {error && (
+        <div className="p-4 rounded-xl bg-red-900/30 text-red-300 border border-red-800 flex items-center gap-3">
+          <span>⚠️</span>
+          <span>{error}</span>
+        </div>
+      )}
+
+      {successMsg && (
+        <div className="p-4 rounded-xl bg-emerald-900/40 text-emerald-300 border border-emerald-700 font-semibold">
+          {successMsg}
+        </div>
+      )}
+
+      {/* EXTRACTION RESULT DISPLAY */}
+      {result && (
+        <div className="glass-card p-6 space-y-6 animate-fade-in">
+          {/* Status & Action Bar */}
+          <div className="flex justify-between items-center flex-wrap gap-4 border-b border-gray-800 pb-4">
+            <div>
+              <div className="flex items-center gap-3">
+                <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                  {result.format || 'Extracted'}
+                </span>
+                <span className="text-xs text-gray-400">Confidence: {result.confidence}%</span>
               </div>
-              <div className="grid grid-cols-3 gap-3 text-center mb-4">
-                <div className="p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg"><p className="text-2xl font-bold text-emerald-600">{validation.passed.length}</p><p className="text-xs font-semibold text-emerald-700">PASSED</p></div>
-                <div className="p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg"><p className="text-2xl font-bold text-amber-600">{validation.warnings.length}</p><p className="text-xs font-semibold text-amber-700">WARNINGS</p></div>
-                <div className="p-3 bg-red-50 dark:bg-red-900/20 rounded-lg"><p className="text-2xl font-bold text-red-600">{validation.errors.length}</p><p className="text-xs font-semibold text-red-700">ERRORS</p></div>
-              </div>
-              <div className="space-y-1 text-sm max-h-52 overflow-y-auto">
-                {validation.passed.map((m, i) => <div key={`p${i}`} className="flex gap-2 text-emerald-700 dark:text-emerald-400"><span className="flex-shrink-0">✅</span><span>{m}</span></div>)}
-                {validation.warnings.map((m, i) => <div key={`w${i}`} className="flex gap-2 text-amber-600 dark:text-amber-400"><span className="flex-shrink-0">⚠️</span><span>{m}</span></div>)}
-                {validation.errors.map((m, i) => <div key={`e${i}`} className="flex gap-2 text-red-600 dark:text-red-400"><span className="flex-shrink-0">❌</span><span>{m}</span></div>)}
-              </div>
+              <h2 className="text-xl font-bold text-white mt-1">Extracted Invoice Summary</h2>
             </div>
-          )}
 
-          {/* Recommendation */}
-          {recommendation && (
-            <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm">
-              <h3 className="font-semibold text-slate-800 dark:text-white mb-2">📊 Format Analysis</h3>
-              <p className="text-sm text-slate-600 dark:text-slate-400">{recommendation.reason}</p>
-              <ul className="mt-2 space-y-1 text-sm text-slate-500">
-                {recommendation.tips.map((t, i) => <li key={i}>💡 {t}</li>)}
-              </ul>
+            <div className="flex gap-3">
+              <button
+                onClick={downloadCSV}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-gray-200 text-sm font-semibold rounded-lg flex items-center gap-2 border border-gray-700 transition-colors"
+              >
+                <span>💾</span> Export CSV
+              </button>
+              <button
+                onClick={handleImportOrder}
+                disabled={importing}
+                className="btn-primary py-2 px-5 rounded-lg text-sm font-bold flex items-center gap-2 shadow-lg shadow-indigo-500/30"
+              >
+                {importing ? 'Importing...' : '📥 Create Sales Order'}
+              </button>
             </div>
-          )}
+          </div>
 
-          {/* Extracted Data */}
-          {extracted && (
-            <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm overflow-hidden">
-              <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
-                <h3 className="font-semibold text-slate-800 dark:text-white text-lg">📋 Extracted Data</h3>
-                {extracted.metadata && (
-                  <span className="px-3 py-1 bg-slate-100 dark:bg-slate-700 rounded-full text-xs text-slate-500">
-                    {extracted.metadata.fileType.toUpperCase()} • {extracted.metadata.extractionConfidence}% confidence
-                  </span>
-                )}
-              </div>
+          {/* Header Metadata Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-slate-900/60 p-4 rounded-xl border border-gray-800">
+              <p className="text-xs text-gray-400">Invoice / Bill Number</p>
+              <p className="text-base font-bold text-white mt-0.5">{result.header.invoiceNumber || 'Auto-generated'}</p>
+            </div>
 
-              <div className="p-5 space-y-6">
-                {/* Seller & Buyer */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {extracted.seller && (extracted.seller.name || extracted.seller.gstin) && (
-                    <div className="bg-slate-50 dark:bg-slate-700/50 rounded-lg p-4">
-                      <h4 className="text-xs font-bold text-slate-400 uppercase mb-2">🏭 Seller</h4>
-                      {extracted.seller.name && <p className="font-semibold text-slate-800 dark:text-white">{extracted.seller.name}</p>}
-                      {extracted.seller.address && <p className="text-sm text-slate-500 mt-1">{extracted.seller.address}</p>}
-                      <div className="mt-2 space-y-1 text-sm text-slate-600 dark:text-slate-400">
-                        {extracted.seller.gstin && <p>GSTIN: <span className="font-mono font-medium text-emerald-600">{extracted.seller.gstin}</span></p>}
-                        {extracted.seller.pan && <p>PAN: <span className="font-mono">{extracted.seller.pan}</span></p>}
-                        {extracted.seller.fssai && <p>FSSAI: <span className="font-mono">{extracted.seller.fssai}</span></p>}
-                        {extracted.seller.phone && <p>📞 {extracted.seller.phone}</p>}
-                      </div>
-                    </div>
+            <div className="bg-slate-900/60 p-4 rounded-xl border border-gray-800">
+              <p className="text-xs text-gray-400">Invoice Date</p>
+              <p className="text-base font-bold text-white mt-0.5">{result.header.invoiceDate || 'Today'}</p>
+            </div>
+
+            <div className="bg-slate-900/60 p-4 rounded-xl border border-gray-800">
+              <p className="text-xs text-gray-400">Customer (Billed To)</p>
+              <p className="text-base font-bold text-white mt-0.5">{result.header.customerName || 'Selected Customer'}</p>
+               {result.header.customerGSTIN && <p className="text-xs text-indigo-300 font-mono">GSTIN: {result.header.customerGSTIN}</p>}
+            </div>
+
+            <div className="bg-slate-900/60 p-4 rounded-xl border border-gray-800">
+              <p className="text-xs text-gray-400">Grand Total</p>
+              <p className="text-lg font-bold text-emerald-400 mt-0.5">{formatCurrency(result.header.grandTotal)}</p>
+            </div>
+          </div>
+
+          {/* Line Items Table */}
+          <div>
+            <h3 className="text-base font-bold text-white mb-3">Line Items ({result.items?.length || 0})</h3>
+            <div className="overflow-x-auto max-h-96 rounded-xl border border-gray-800">
+              <table className="w-full text-left text-sm text-gray-300">
+                <thead className="text-xs uppercase bg-slate-900 text-gray-400 sticky top-0">
+                  <tr>
+                    <th className="px-4 py-3">#</th>
+                    <th className="px-4 py-3">ERP ID</th>
+                    <th className="px-4 py-3">Product Name</th>
+                    <th className="px-4 py-3">HSN</th>
+                    <th className="px-4 py-3 text-right">Qty</th>
+                    <th className="px-4 py-3 text-right">Unit Price</th>
+                    <th className="px-4 py-3 text-right">Taxable</th>
+                    <th className="px-4 py-3 text-right">GST %</th>
+                    <th className="px-4 py-3 text-right">Total</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-800">
+                  {result.items?.map((item: any, i: number) => (
+                    <tr key={i} className="hover:bg-slate-800/40 transition-colors">
+                      <td className="px-4 py-2.5 font-medium text-gray-400">{item.srNo || i + 1}</td>
+                      <td className="px-4 py-2.5 font-mono text-xs text-indigo-300">{item.erpId || '-'}</td>
+                      <td className="px-4 py-2.5 font-semibold text-white">{item.productName}</td>
+                      <td className="px-4 py-2.5 font-mono text-xs">{item.hsnCode || '-'}</td>
+                      <td className="px-4 py-2.5 text-right font-bold text-white">{item.quantity}</td>
+                      <td className="px-4 py-2.5 text-right">{formatCurrency(item.unitPrice)}</td>
+                      <td className="px-4 py-2.5 text-right">{formatCurrency(item.taxableAmount)}</td>
+                      <td className="px-4 py-2.5 text-right font-mono text-xs text-amber-300">{item.gstRate}%</td>
+                      <td className="px-4 py-2.5 text-right font-bold text-emerald-400">{formatCurrency(item.totalAmount)}</td>
+                    </tr>
+                  ))}
+                  {(!result.items || result.items.length === 0) && (
+                    <tr>
+                      <td colSpan={9} className="text-center py-6 text-gray-500">
+                        No line items parsed. Check raw text.
+                      </td>
+                    </tr>
                   )}
-                  {extracted.buyer && (extracted.buyer.name || extracted.buyer.phone) && (
-                    <div className="bg-slate-50 dark:bg-slate-700/50 rounded-lg p-4">
-                      <h4 className="text-xs font-bold text-slate-400 uppercase mb-2">👤 Buyer / Customer</h4>
-                      {editingCustomer ? (
-                        <div className="flex gap-2 mb-2">
-                          <input
-                            type="text"
-                            value={customerNameInput}
-                            onChange={(e) => setCustomerNameInput(e.target.value)}
-                            onBlur={() => {
-                              if (!extracted) return;
-                              setExtracted({
-                                ...extracted,
-                                buyer: { ...(extracted.buyer || { name: '', phone: '', address: '' }), name: customerNameInput } as Buyer
-                              });
-                              setEditingCustomer(false);
-                            }}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                if (!extracted) return;
-                                setExtracted({
-                                  ...extracted,
-                                  buyer: { ...(extracted.buyer || { name: '', phone: '', address: '' }), name: customerNameInput } as Buyer
-                                });
-                                setEditingCustomer(false);
-                              }
-                            }}
-                            className="flex-1 px-2 py-1 bg-white dark:bg-slate-800 border border-emerald-500 rounded text-sm font-bold text-slate-800 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none"
-                            placeholder="Enter customer name"
-                            autoFocus
-                          />
-                        </div>
-                      ) : (
-                        <div
-                          className="flex items-center gap-2 cursor-pointer group mb-2"
-                          onClick={() => {
-                            const currentName = extracted?.buyer?.name || '';
-                            setCustomerNameInput(currentName);
-                            setEditingCustomer(true);
-                          }}
-                        >
-                          <p className={`font-semibold flex-1 ${!extracted?.buyer?.name ? 'text-red-500' : 'text-slate-800 dark:text-white'}`}>
-                            {extracted?.buyer?.name || 'Not detected — tap to edit'}
-                          </p>
-                          <span className="text-xs text-slate-400 group-hover:text-emerald-500 transition-colors">✏️</span>
-                        </div>
-                      )}
-                      {extracted.buyer.address && <p className="text-sm text-slate-500 mt-1">{extracted.buyer.address}</p>}
-                      {extracted.buyer.phone && <p className="text-sm mt-2">📞 {extracted.buyer.phone}</p>}
-                    </div>
-                  )}
-                </div>
-
-                {/* Invoice Meta */}
-                {extracted.invoice && (extracted.invoice.number || extracted.invoice.date) && (
-                  <div>
-                    <h4 className="text-xs font-bold text-slate-400 uppercase mb-2">🧾 Invoice Details</h4>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                      {[
-                        { label: 'Invoice #', val: extracted.invoice.number },
-                        { label: 'Date', val: extracted.invoice.date },
-                        { label: 'Salesman', val: extracted.invoice.salesman },
-                        { label: 'Beat', val: extracted.invoice.beat },
-                      ].filter(x => x.val).map((x, i) => (
-                        <div key={i} className="bg-slate-50 dark:bg-slate-700/50 rounded-lg p-3">
-                          <p className="text-xs text-slate-400">{x.label}</p>
-                          <p className="font-medium text-slate-800 dark:text-white text-sm mt-0.5">{x.val}</p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Line Items */}
-                {extracted.items && extracted.items.length > 0 && (
-                  <div>
-                    <h4 className="text-xs font-bold text-slate-400 uppercase mb-2">📦 Line Items ({extracted.items.length})</h4>
-                    <div className="overflow-x-auto border border-slate-200 dark:border-slate-700 rounded-lg">
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className="bg-slate-100 dark:bg-slate-700 text-xs uppercase text-slate-500">
-                            <th className="px-3 py-2 text-left">#</th>
-                            <th className="px-3 py-2 text-left">ERP ID</th>
-                            <th className="px-3 py-2 text-left">Description</th>
-                            <th className="px-3 py-2 text-center">HSN</th>
-                            <th className="px-3 py-2 text-right">Qty</th>
-                            <th className="px-3 py-2 text-right">Rate</th>
-                            <th className="px-3 py-2 text-right">Taxable</th>
-                            <th className="px-3 py-2 text-right">GST</th>
-                            <th className="px-3 py-2 text-right">Total</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                          {extracted.items.map((item, i) => (
-                            <tr key={i} className="hover:bg-slate-50 dark:hover:bg-slate-700/30">
-                              <td className="px-3 py-2 text-slate-400">{item.sno}</td>
-                              <td className="px-3 py-2 font-mono text-xs text-emerald-600">{item.erpId || '—'}</td>
-                              <td className="px-3 py-2 text-slate-800 dark:text-white">{item.description || '—'}</td>
-                              <td className="px-3 py-2 text-center font-mono text-xs text-slate-400">{item.hsn || '—'}</td>
-                              <td className="px-3 py-2 text-right font-medium">{item.quantity || '—'}</td>
-                              <td className="px-3 py-2 text-right">{item.rate ? INR(item.rate) : '—'}</td>
-                              <td className="px-3 py-2 text-right">{item.taxable ? INR(item.taxable) : '—'}</td>
-                              <td className="px-3 py-2 text-right text-amber-600">{item.gst ? INR(item.gst) : '—'}</td>
-                              <td className="px-3 py-2 text-right font-semibold text-slate-800 dark:text-white">{item.total ? INR(item.total) : '—'}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
-
-                {/* Totals */}
-                {extracted.totals && extracted.totals.grandTotal > 0 && (
-                  <div>
-                    <h4 className="text-xs font-bold text-slate-400 uppercase mb-2">💰 Totals</h4>
-                    <div className="bg-gradient-to-br from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl p-5">
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
-                        {[
-                          { label: 'Total Qty', val: extracted.totals.totalQty ? String(extracted.totals.totalQty) : null },
-                          { label: 'Taxable Amount', val: extracted.totals.taxableAmount ? INR(extracted.totals.taxableAmount) : null },
-                          { label: 'CGST', val: extracted.totals.cgst ? INR(extracted.totals.cgst) : null },
-                          { label: 'SGST', val: extracted.totals.sgst ? INR(extracted.totals.sgst) : null },
-                          { label: 'Total GST', val: extracted.totals.totalGst ? INR(extracted.totals.totalGst) : null },
-                          { label: 'Discount', val: extracted.totals.discount ? INR(extracted.totals.discount) : null },
-                          { label: 'Round Off', val: extracted.totals.roundOff ? INR(extracted.totals.roundOff) : null },
-                        ].filter(x => x.val).map((x, i) => (
-                          <div key={i}>
-                            <p className="text-xs text-emerald-600 dark:text-emerald-400">{x.label}</p>
-                            <p className="font-semibold text-emerald-800 dark:text-emerald-300">{x.val}</p>
-                          </div>
-                        ))}
-                      </div>
-                      <div className="mt-4 pt-4 border-t border-emerald-200 dark:border-emerald-700 flex items-center justify-between">
-                        <span className="text-lg font-bold text-emerald-800 dark:text-emerald-300">Grand Total</span>
-                        <span className="text-3xl font-bold text-emerald-700 dark:text-emerald-300">{INR(extracted.totals.grandTotal)}</span>
-                      </div>
-{extracted.totals.amountInWords && (
-                         <p className="mt-2 text-xs italic text-emerald-600 dark:text-emerald-400">{extracted.totals.amountInWords}</p>
-                       )}
-                     </div>
-                   </div>
-                 )}
-
-                 {/* Bank & Transport Details */}
-                 {(extracted.totals?.bankName || extracted.totals?.vehicleNumber || extracted.totals?.bankIfscCode) && (
-                   <div className="bg-slate-50 dark:bg-slate-700/30 rounded-lg p-4 border border-slate-200 dark:border-slate-700">
-                     <h4 className="text-[10px] font-bold text-slate-400 uppercase mb-3">🏦 Bank & Transport</h4>
-                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-                       {extracted.totals?.bankName && (
-                         <div><span className="text-slate-400">Bank:</span> <span className="font-medium text-slate-800 dark:text-white">{extracted.totals.bankName}</span></div>
-                       )}
-                       {extracted.totals?.bankAccountNumber && (
-                         <div><span className="text-slate-400">Account:</span> <span className="font-mono font-medium text-slate-800 dark:text-white">{extracted.totals.bankAccountNumber}</span></div>
-                       )}
-                       {extracted.totals?.bankIfscCode && (
-                         <div><span className="text-slate-400">IFSC:</span> <span className="font-mono font-medium text-slate-800 dark:text-white">{extracted.totals.bankIfscCode}</span></div>
-                       )}
-                       {extracted.totals?.vehicleNumber && (
-                         <div><span className="text-slate-400">Vehicle:</span> <span className="font-mono font-medium text-slate-800 dark:text-white">{extracted.totals.vehicleNumber}</span></div>
-                       )}
-                     </div>
-                   </div>
-                 )}
-
-                 {/* Additional Terms */}
-                 {extracted.totals?.additionalTerms && (
-                   <div className="bg-slate-50 dark:bg-slate-700/30 rounded-lg p-4 border border-slate-200 dark:border-slate-700">
-                     <h4 className="text-[10px] font-bold text-slate-400 uppercase mb-2">📋 Additional Information</h4>
-                     <p className="text-sm text-slate-700 dark:text-slate-300">{extracted.totals.additionalTerms}</p>
-                   </div>
-                 )}
-
-                 {/* Actions */}
-                <div className="flex gap-3 pt-2">
-                  <button onClick={handleImport} disabled={importing} className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-semibold disabled:opacity-50 flex items-center justify-center gap-2">
-                    {importing ? (
-                      <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Importing...</>
-                    ) : (
-                      <>📥 Import as Order</>
-                    )}
-                  </button>
-                  <button onClick={reset} className="px-6 py-3 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 rounded-xl font-medium hover:bg-slate-50 dark:hover:bg-slate-700">
-                    🔄 New Upload
-                  </button>
-                </div>
-              </div>
+                </tbody>
+              </table>
             </div>
-          )}
-        </>
+          </div>
+        </div>
       )}
     </div>
   );

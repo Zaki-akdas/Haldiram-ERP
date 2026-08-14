@@ -2,65 +2,116 @@
 
 import { useState, useEffect } from 'react';
 
+type DenomCalculatorProps = {
+  targetAmount?: number;
+  onDenominationsChange?: (denoms: Record<string, number>, total: number) => void;
+};
+
 const DENOMINATIONS = [500, 200, 100, 50, 20, 10, 5, 2, 1];
 
-interface DenominationCounts {
-  [key: string]: number;
-}
-
-interface DenominationCalculatorProps {
-  onTotalChange: (total: number, counts: DenominationCounts) => void;
-  targetAmount?: number;
-}
-
-export default function DenominationCalculator({ onTotalChange, targetAmount }: DenominationCalculatorProps) {
-  const [counts, setCounts] = useState<DenominationCounts>({
-    '500': 0, '200': 0, '100': 0, '50': 0, '20': 0, '10': 0, '5': 0, '2': 0, '1': 0
-  });
-
-  const total = Object.entries(counts).reduce((sum, [val, count]) => sum + (Number(val) * count), 0);
+export default function DenominationCalculator({ targetAmount, onDenominationsChange }: DenomCalculatorProps) {
+  const [counts, setCounts] = useState<Record<string, number>>(
+    DENOMINATIONS.reduce((acc, curr) => ({ ...acc, [curr]: 0 }), {})
+  );
+  
+  const [total, setTotal] = useState(0);
 
   useEffect(() => {
-    onTotalChange(total, counts);
-  }, [total, counts, onTotalChange]);
+    const newTotal = DENOMINATIONS.reduce((sum, denom) => sum + denom * (counts[denom] || 0), 0);
+    setTotal(newTotal);
+    
+    if (onDenominationsChange) {
+      onDenominationsChange(counts, newTotal);
+    }
+  }, [counts, onDenominationsChange]);
 
-  const handleChange = (val: number, count: string) => {
-    const n = parseInt(count, 10) || 0;
-    setCounts(prev => ({ ...prev, [val.toString()]: n }));
+  const handleCountChange = (denom: number, val: string) => {
+    const num = parseInt(val, 10);
+    setCounts(prev => ({
+      ...prev,
+      [denom]: isNaN(num) || num < 0 ? 0 : num
+    }));
+  };
+
+  const handleReset = () => {
+    setCounts(DENOMINATIONS.reduce((acc, curr) => ({ ...acc, [curr]: 0 }), {}));
+  };
+
+  const difference = (targetAmount || 0) - total;
+  
+  const formatINR = (amount: number) => {
+    return new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: 'INR',
+      maximumFractionDigits: 0
+    }).format(amount);
   };
 
   return (
-    <div className="bg-slate-50 dark:bg-slate-700/50 rounded-xl p-3 sm:p-4 space-y-3">
-      <div className="flex justify-between items-center mb-2 border-b border-slate-200 dark:border-slate-600 pb-2">
-        <h4 className="text-[10px] sm:text-xs font-bold text-slate-400 uppercase">Cash Denominations</h4>
-        <div className="text-right">
-          <p className="text-base sm:text-lg font-bold text-emerald-600">₹{total.toLocaleString()}</p>
-          {targetAmount !== undefined && (
-            <p className={`text-[9px] sm:text-[10px] ${total === targetAmount ? 'text-emerald-500' : 'text-amber-500'}`}>
-              {total === targetAmount ? '✅ Matches' : `Diff: ₹${(targetAmount - total).toLocaleString()}`}
-            </p>
-          )}
+    <div className="glass-card p-6 border border-border">
+      <div className="mb-6 flex items-center justify-between border-b border-border pb-4">
+        <div>
+          <h3 className="text-lg font-semibold text-text-primary">Cash Denominations</h3>
+          <p className="text-sm text-text-secondary">Enter currency note counts</p>
         </div>
+        <button 
+          onClick={handleReset}
+          className="rounded-lg px-3 py-1.5 text-sm font-medium text-danger hover:bg-danger/10 transition-colors"
+        >
+          Reset All
+        </button>
       </div>
-      
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-3 gap-y-2 sm:gap-x-4 sm:gap-y-3">
-        {DENOMINATIONS.map(d => (
-          <div key={d} className="flex items-center gap-1.5 sm:gap-3">
-            <span className="text-[10px] sm:text-xs font-medium text-slate-500 w-7 sm:w-8">₹{d}</span>
-            <span className="text-[10px] sm:text-xs text-slate-400">×</span>
-            <input
-              type="number"
-              min="0"
-              value={counts[d.toString()] || ''}
-              onChange={(e) => handleChange(d, e.target.value)}
-              placeholder="0"
-              className="w-12 sm:w-16 px-1.5 sm:px-2 py-1 text-right text-xs sm:text-sm border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-800 text-slate-800 dark:text-white outline-none focus:ring-1 focus:ring-emerald-500"
-            />
-            <span className="text-[10px] sm:text-xs font-mono text-slate-400 w-12 sm:w-16 text-right">
-              = {(d * (counts[d.toString()] || 0)).toLocaleString()}
-            </span>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 mb-8">
+        {DENOMINATIONS.map(denom => (
+          <div key={denom} className="flex items-center justify-between rounded-xl border border-border bg-white/50 dark:bg-gray-800/50 p-3 shadow-sm transition-all hover:border-primary/50">
+            <div className="flex items-center gap-3">
+              <span className="flex h-8 w-12 items-center justify-center rounded bg-gray-100 dark:bg-gray-700 font-medium text-text-primary shadow-inner">
+                ₹{denom}
+              </span>
+              <span className="text-text-secondary text-sm font-medium">x</span>
+            </div>
+            <div className="flex flex-col items-end gap-1">
+              <input
+                type="number"
+                min="0"
+                value={counts[denom] || ''}
+                onChange={(e) => handleCountChange(denom, e.target.value)}
+                className="w-20 rounded-lg border border-border bg-white dark:bg-gray-900 px-2 py-1 text-right text-sm font-medium text-text-primary focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                placeholder="0"
+              />
+              <span className="text-xs font-semibold text-text-secondary">
+                {formatINR(denom * (counts[denom] || 0))}
+              </span>
+            </div>
           </div>
         ))}
+      </div>
+
+      <div className="rounded-xl bg-gray-50 dark:bg-gray-800/80 p-5 border border-border shadow-inner">
+        <div className="flex flex-col gap-3">
+          {targetAmount !== undefined && (
+            <div className="flex justify-between items-center text-sm">
+              <span className="text-text-secondary">Target Amount:</span>
+              <span className="font-semibold text-text-primary">{formatINR(targetAmount)}</span>
+            </div>
+          )}
+          
+          <div className="flex justify-between items-center">
+            <span className="text-text-secondary text-sm">Calculated Total:</span>
+            <span className="text-2xl font-bold text-primary tracking-tight">{formatINR(total)}</span>
+          </div>
+          
+          {targetAmount !== undefined && (
+            <div className="mt-2 flex justify-between items-center border-t border-border pt-3">
+              <span className="text-sm font-medium text-text-secondary">Difference:</span>
+              <span className={`font-bold ${difference === 0 ? 'text-accent' : 'text-danger'}`}>
+                {difference > 0 ? 'Short by ' : difference < 0 ? 'Excess of ' : ''}
+                {formatINR(Math.abs(difference))}
+              </span>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

@@ -1,139 +1,81 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseAdmin } from '@/db';
-import { getCurrentUser } from '@/lib/auth';
+import { getCurrentUser, isManager } from '@/lib/auth';
+import { db } from '@/db';
+import { users, orders } from '@/db/schema';
+import { eq, inArray, count, sql } from 'drizzle-orm';
+import { createClient } from '@supabase/supabase-js';
 
-export const dynamic = 'force-dynamic';
+const supabaseAdmin = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+  process.env.SUPABASE_SERVICE_ROLE_KEY || '',
+  {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false
+    }
+  }
+);
 
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
-    const supabase = getSupabaseAdmin();
     const user = await getCurrentUser();
-    if (!user) {
-      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
-    }
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    if (!isManager(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
-    if (user.role !== 'admin' && user.role !== 'manager') {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
-    }
+    const salespeopleList = await db
+      .select()
+      .from(users)
+      .where(inArray(users.role, ['salesperson', 'manager']));
 
-    const { data: salespeopleData } = await supabase
-      .from('users')
-      .select('*')
-      .eq('role', 'salesperson');
+    const activeSalespeople = salespeopleList.filter(sp => sp.isActive);
 
-    const result: any[] = [];
-    for (const sp of salespeopleData || []) {
-      const { count: totalOrdersCount } = await supabase
-        .from('orders')
-        .select('*', { count: 'exact', head: true })
-        .eq('salesperson_id', sp.id);
+    const salespeople = await Promise.all(
+      activeSalespeople.map(async (sp) => {
+        const [{ orderCount }] = await db.select({ orderCount: count() }).from(orders).where(eq(orders.salespersonId, sp.id));
+        const [{ totalRevenue }] = await db.select({ totalRevenue: sql<number>`sum(CAST(${orders.grandTotal} AS DECIMAL))` }).from(orders).where(eq(orders.salespersonId, sp.id));
+        
+        return {
+          ...sp,
+          orderCount,
+          totalRevenue: totalRevenue || 0
+        };
+      })
+    );
 
-      const { count: monthlyOrdersCount } = await supabase
-        .from('orders')
-        .select('*', { count: 'exact', head: true })
-        .eq('salesperson_id', sp.id)
-        .gte('order_date', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString());
-
-      const { data: revenueData } = await supabase
-        .from('orders')
-        .select('grand_total')
-        .eq('salesperson_id', sp.id);
-
-      const totalRevenue = revenueData?.reduce((sum: number, o: any) => sum + Number(o.grand_total || 0), 0) || 0;
-
-      const { data: monthlyRevenueData } = await supabase
-        .from('orders')
-        .select('grand_total')
-        .eq('salesperson_id', sp.id)
-        .gte('order_date', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString());
-
-      const monthlyRevenue = monthlyRevenueData?.reduce((sum: number, o: any) => sum + Number(o.grand_total || 0), 0) || 0;
-
-      const { count: totalCustomersCount } = await supabase
-        .from('customers')
-        .select('*', { count: 'exact', head: true })
-        .eq('assigned_salesperson_id', sp.id);
-
-      result.push({
-        id: sp.id,
-        email: sp.email,
-        name: sp.name,
-        phone: sp.phone,
-        isActive: sp.is_active,
-        createdAt: sp.created_at,
-        totalOrders: totalOrdersCount || 0,
-        monthlyOrders: monthlyOrdersCount || 0,
-        totalRevenue,
-        monthlyRevenue,
-        totalCustomers: totalCustomersCount || 0,
-      });
-    }
-
-    result.sort((a, b) => b.totalRevenue - a.totalRevenue);
-
-    return NextResponse.json({
-      salespeople: result.map(sp => ({
-        ...sp,
-        totalRevenue: Number(sp.totalRevenue),
-        monthlyRevenue: Number(sp.monthlyRevenue),
-      })),
-    });
+    return NextResponse.json({ salespeople });
   } catch (error) {
-    console.error('Salespeople fetch error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: (error as Error).message }, { status: 500 });
   }
 }
 
-export async function POST(request: NextRequest) {
+export async function POST(req: NextRequest) {
   try {
-    const supabase = getSupabaseAdmin();
     const user = await getCurrentUser();
-    if (!user) {
-      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
-    }
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    if (user.role !== 'admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
-    if (user.role !== 'admin') {
-      return NextResponse.json({ error: 'Only admin can create salespeople' }, { status: 403 });
-    }
+    const body = await req.json();
+    const { name, email, password, phone } = body;
 
-    const body = await request.json();
-    const { email, password, name, phone } = body;
+    const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true
+    });
 
-    if (!email || !password || !name) {
-      return NextResponse.json(
-        { error: 'Email, password, and name are required' },
-        { status: 400 }
-      );
-    }
+    if (authError) throw authError;
 
-    const { data: existing } = await supabase
-      .from('users')
-      .select('id')
-      .eq('email', email.toLowerCase())
-      .limit(1);
+    const [newUser] = await db.insert(users).values({
+      email,
+      password: 'supabase_managed',
+      name,
+      phone,
+      role: 'salesperson',
+      isActive: true
+    }).returning();
 
-    if (existing && existing.length > 0) {
-      return NextResponse.json({ error: 'Email already exists' }, { status: 400 });
-    }
-
-    const { data: newUser, error } = await supabase
-      .from('users')
-      .insert({
-        email: email.toLowerCase(),
-        password,
-        name,
-        phone,
-        role: 'salesperson',
-        is_active: true,
-      })
-      .select()
-      .single();
-
-    if (error) throw error;
-
-    return NextResponse.json({ user: newUser }, { status: 201 });
+    return NextResponse.json(newUser, { status: 201 });
   } catch (error) {
-    console.error('Salesperson create error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: (error as Error).message }, { status: 500 });
   }
 }

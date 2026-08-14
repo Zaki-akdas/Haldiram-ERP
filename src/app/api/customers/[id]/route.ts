@@ -1,87 +1,54 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseAdmin } from '@/db';
-import { getCurrentUser } from '@/lib/auth';
+import { getCurrentUser, isManager } from '@/lib/auth';
+import { db } from '@/db';
+import { customers } from '@/db/schema';
+import { eq } from 'drizzle-orm';
 
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+const allowedCustomerFields = ['name', 'phone', 'email', 'gstin', 'pan', 'address', 'city', 'state', 'pincode', 'beat', 'creditLimit', 'assignedSalespersonId', 'isActive'];
+
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const supabase = getSupabaseAdmin();
     const user = await getCurrentUser();
-    if (!user || (user.role !== 'admin' && user.role !== 'manager')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
-    }
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    if (!isManager(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
     const { id } = await params;
-    const customerId = parseInt(id, 10);
-    const body = await request.json();
+    const body = await req.json();
 
-    const { data: updated, error } = await supabase
-      .from('customers')
-      .update({
-        ...body,
-      })
-      .eq('id', customerId)
-      .select()
-      .single();
+    const updateData: any = { updatedAt: new Date() };
+    for (const field of allowedCustomerFields) {
+      if (body[field] !== undefined) {
+        updateData[field] = body[field];
+      }
+    }
 
-    if (error || !updated) return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
+    const [updated] = await db.update(customers)
+      .set(updateData)
+      .where(eq(customers.id, Number(id)))
+      .returning();
 
-    return NextResponse.json({ customer: updated });
+    if (!updated) {
+       return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
+    }
+
+    return NextResponse.json(updated);
   } catch (error) {
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: (error as Error).message }, { status: 500 });
   }
 }
 
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const supabase = getSupabaseAdmin();
     const user = await getCurrentUser();
-    if (!user || (user.role !== 'admin' && user.role !== 'manager')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
-    }
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    if (!isManager(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
     const { id } = await params;
-    const customerId = parseInt(id, 10);
 
-    if (isNaN(customerId)) return NextResponse.json({ error: 'Invalid customer ID' }, { status: 400 });
-
-    const { data: existingOrders } = await supabase
-      .from('orders')
-      .select('id')
-      .eq('customer_id', customerId)
-      .limit(1);
-
-    if (existingOrders && existingOrders.length > 0) {
-      return NextResponse.json({
-        error: 'Cannot delete customer with existing orders. Delete orders first.',
-      }, { status: 400 });
-    }
-
-    const { data: deleted, error } = await supabase
-      .from('customers')
-      .delete()
-      .eq('id', customerId)
-      .select()
-      .single();
-
-    if (error || !deleted) return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
-
-    await supabase.from('activity_logs').insert({
-      user_id: user.id,
-      activity_type: 'customer_added',
-      entity_type: 'customer',
-      entity_id: customerId,
-      description: `Deleted customer ${deleted.name}`,
-    });
+    await db.delete(customers).where(eq(customers.id, Number(id)));
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error('Customer delete error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: (error as Error).message }, { status: 500 });
   }
 }

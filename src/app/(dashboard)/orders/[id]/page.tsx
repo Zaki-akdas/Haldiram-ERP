@@ -1,516 +1,609 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useState, useEffect } from 'react';
+import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/components/AuthProvider';
-import DenominationCalculator from '@/components/DenominationCalculator';
 
-interface OrderDetail {
-  id: number;
-  invoiceNumber: string;
-  customerName: string;
-  customerPhone: string | null;
-  customerAddress: string | null;
-  salespersonName: string;
-  orderDate: string;
-  deliveryDate: string | null;
-  status: string;
-  subtotal: number;
-  taxableAmount: number;
-  cgst: number;
-  sgst: number;
-  totalGst: number;
-  grandTotal: number;
-  amountPaid: number;
-  balance: number;
-  settlementStatus: string;
-  beat: string | null;
-  notes: string | null;
-}
+const DENOMINATIONS = [500, 200, 100, 50, 20, 10, 5, 2, 1] as const;
 
-interface OrderItem {
-  id: number;
-  productName: string;
-  erpId: string | null;
-  quantity: number;
-  unit: string;
-  unitPrice: number;
-  taxableAmount: number;
-  gstRate: number;
-  gstAmount: number;
-  totalAmount: number;
-}
+function CashDenominationInput({ amount, onChange }: { amount: number; onChange: (denoms: { denomination: number; quantity: number }[]) => void }) {
+  const [denoms, setDenoms] = useState<{ denomination: number; quantity: number }[]>(
+    DENOMINATIONS.map(d => ({ denomination: d, quantity: 0 }))
+  );
 
-interface Settlement {
-  id: number;
-  amount: number;
-  paymentMode: string;
-  referenceNumber: string | null;
-  settledAt: string;
-}
+  const updateQuantity = (denomination: number, quantity: number) => {
+    const updated = denoms.map(d => d.denomination === denomination ? { ...d, quantity: Math.max(0, quantity) } : d);
+    setDenoms(updated);
+    onChange(updated);
+  };
 
-function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('en-IN', {
-    style: 'currency',
-    currency: 'INR',
-  }).format(amount);
-}
+  const calculatedTotal = denoms.reduce((sum, d) => sum + d.denomination * d.quantity, 0);
+  const isMismatch = amount > 0 && calculatedTotal !== amount;
 
-function formatDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleDateString('en-IN', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  return (
+    <div className="bg-slate-900/50 p-4 rounded-xl border border-white/5">
+      <p className="text-xs text-gray-400 mb-3">Cash Denominations (Optional)</p>
+      <div className="grid grid-cols-1 gap-2">
+        {denoms.map(d => (
+          <div key={d.denomination} className="flex items-center gap-3">
+            <span className="text-sm font-medium text-gray-300 w-16">₹{d.denomination}</span>
+            <input
+              type="number"
+              min="0"
+              className="input-field w-20 text-sm text-center"
+              value={d.quantity}
+              onChange={e => updateQuantity(d.denomination, parseInt(e.target.value) || 0)}
+            />
+            <span className="text-xs text-gray-500 w-16">= ₹{(d.denomination * d.quantity).toFixed(2)}</span>
+          </div>
+        ))}
+      </div>
+      <div className="mt-3 pt-3 border-t border-white/10 flex justify-between items-center">
+        <span className="text-xs text-gray-400">Calculated Cash Total:</span>
+        <span className={`text-sm font-bold ${isMismatch ? 'text-rose-400' : 'text-emerald-400'}`}>
+          ₹{calculatedTotal.toFixed(2)}
+        </span>
+      </div>
+      {isMismatch && (
+        <p className="text-xs text-rose-400 mt-2">Cash total does not match payment amount.</p>
+      )}
+    </div>
+  );
 }
 
 export default function OrderDetailPage() {
-  const { user, authFetch } = useAuth();
-  const params = useParams();
   const router = useRouter();
-  const [order, setOrder] = useState<OrderDetail | null>(null);
-  const [items, setItems] = useState<OrderItem[]>([]);
-  const [settlements, setSettlements] = useState<Settlement[]>([]);
+  const params = useParams();
+  const id = params.id as string;
+  const { authFetch } = useAuth();
+  
+  const [order, setOrder] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [showSettlement, setShowSettlement] = useState(false);
-  const [settlementData, setSettlementData] = useState({
-    amount: '',
-    paymentMode: 'cash',
-    referenceNumber: '',
-    notes: '',
-    clearingDays: '0', // New
-  });
-  const [submitting, setSubmitting] = useState(false);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  
+  // Payment state
+  const [paymentMode, setPaymentMode] = useState('Cash');
+  const [paymentAmount, setPaymentAmount] = useState<number>(0);
+  const [cashAmount, setCashAmount] = useState<number>(0);
+  const [onlineAmount, setOnlineAmount] = useState<number>(0);
+  const [reference, setReference] = useState('');
+  const [paymentNotes, setPaymentNotes] = useState('');
+  const [denominations, setDenominations] = useState<{ denomination: number; quantity: number }[]>([]);
 
   useEffect(() => {
-    async function fetchOrder() {
+    let mounted = true;
+    const fetchOrder = async () => {
+      setLoading(true);
       try {
-        const res = await authFetch(`/api/orders/${params.id}`);
-        if (!res.ok) throw new Error('Failed to fetch');
-        const data = await res.json();
-        setOrder(data.order);
-        setItems(data.items);
-        setSettlements(data.settlements);
-      } catch (err) {
-        console.error(err);
-      } finally {
+        const res = await authFetch(`/api/orders/${id}`);
+        if (!res.ok) throw new Error('Failed to fetch order');
+        const json = await res.json();
+        if (!mounted) return;
+        const apiOrder = json.order;
+        const apiItems = json.items || [];
+        const apiCustomer = json.customer || {};
+        const apiSalesperson = json.salesperson || {};
+        const apiSettlements = json.settlements || [];
+
+        const totalPaid = apiSettlements.reduce((sum: number, s: any) => sum + Number(s.amount || 0), 0);
+        const grandTotal = Number(apiOrder.grandTotal || 0);
+        const balance = grandTotal - totalPaid;
+
+        setOrder({
+          id: apiOrder.id,
+          customerId: apiOrder.customerId,
+          invoiceNumber: apiOrder.invoiceNumber,
+          status: apiOrder.status === 'confirmed' ? 'Confirmed' : apiOrder.status === 'delivered' ? 'Delivered' : apiOrder.status === 'cancelled' ? 'Cancelled' : 'Pending',
+          date: apiOrder.orderDate ? new Date(apiOrder.orderDate).toISOString().split('T')[0] : '',
+          customerName: apiCustomer.name || 'Unknown',
+          customerPhone: apiCustomer.phone || '-',
+          salesperson: apiSalesperson.name || 'Unknown',
+          beat: apiOrder.beat || '-',
+          creditDays: apiOrder.creditDays || 0,
+          dueDate: apiOrder.dueDate ? new Date(apiOrder.dueDate).toISOString().split('T')[0] : '',
+          items: apiItems.map((item: any) => ({
+            id: item.id,
+            name: item.productName,
+            erpId: item.erpId || '-',
+            qty: Number(item.quantity) || 0,
+            shortQty: Number(item.shortQuantity) || 0,
+            returnQty: Number(item.returnQuantity) || 0,
+            unitPrice: Number(item.unitPrice) || 0,
+            discount: Number(item.discount) || 0,
+            taxable: Number(item.taxableAmount) || 0,
+            gstRate: Number(item.gstRate) || 0,
+            gstAmt: Number(item.gstAmount) || 0,
+            total: Number(item.totalAmount) || 0,
+          })),
+          summary: {
+            subtotal: Number(apiOrder.subtotal) || 0,
+            discount: apiItems.reduce((sum: number, item: any) => sum + Number(item.discount || 0), 0),
+            taxable: Number(apiOrder.taxableAmount) || 0,
+            cgst: Number(apiOrder.cgst) || 0,
+            sgst: Number(apiOrder.sgst) || 0,
+            igst: Number(apiOrder.igst) || 0,
+            totalGst: Number(apiOrder.totalGst) || 0,
+            grandTotal,
+          },
+          financials: {
+            paid: totalPaid,
+            balance,
+          },
+          payments: apiSettlements.map((s: any) => ({
+            id: s.id,
+            date: s.settledAt ? new Date(s.settledAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+            amount: Number(s.amount) || 0,
+            cash: Number(s.cashAmount) || 0,
+            online: Number(s.onlineAmount) || 0,
+            mode: s.paymentMode || 'Cash',
+            reference: s.referenceNumber || '',
+            notes: s.notes || '',
+          })),
+        });
+        setPaymentAmount(balance > 0 ? balance : 0);
         setLoading(false);
+      } catch (e) {
+        console.error(e);
+        if (mounted) setLoading(false);
       }
-    }
-    
+    };
     fetchOrder();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params.id]);
+    return () => { mounted = false; };
+  }, [id, authFetch]);
 
-  const [denominationCounts, setDenominationCounts] = useState<Record<string, number>>({});
-  const [cashTotal, setCashTotal] = useState(0);
+  const formatCurrency = (amount: number) => {
+    return Number(amount || 0).toLocaleString('en-IN', { style: 'currency', currency: 'INR' });
+  };
 
-  const handleSettlement = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!order) return;
-    
-    setSubmitting(true);
+  const handleUpdateStatus = async (newStatus: string) => {
     try {
-      const amount = parseFloat(settlementData.amount);
-      const isSplit = settlementData.paymentMode === 'split';
-      
-      const payload = {
-        orderId: order.id,
-        amount: amount,
-        paymentMode: settlementData.paymentMode,
-        cashAmount: isSplit ? cashTotal : (settlementData.paymentMode === 'cash' ? amount : 0),
-        onlineAmount: isSplit ? (amount - cashTotal) : (settlementData.paymentMode === 'online' ? amount : 0),
-        denominations: settlementData.paymentMode === 'cash' || isSplit ? denominationCounts : null,
-        referenceNumber: settlementData.referenceNumber || null,
-        notes: settlementData.notes || null,
-      };
-
-      const res = await authFetch('/api/settlements', {
-        method: 'POST',
+      const res = await authFetch(`/api/orders/${id}`, {
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ status: newStatus.toLowerCase() }),
       });
-      
       if (res.ok) {
-        setShowSettlement(false);
-        setSettlementData({ amount: '', paymentMode: 'cash', referenceNumber: '', notes: '', clearingDays: '0' });
-        setCashTotal(0);
-        setDenominationCounts({});
-        // Refresh order data
-        const refreshRes = await authFetch(`/api/orders/${params.id}`);
-        const refreshData = await refreshRes.json();
-        setOrder(refreshData.order);
-        setSettlements(refreshData.settlements);
+        const updated = await res.json();
+        const capitalized = updated.status === 'confirmed' ? 'Confirmed' : updated.status === 'delivered' ? 'Delivered' : updated.status === 'cancelled' ? 'Cancelled' : 'Pending';
+        setOrder({ ...order, status: capitalized });
+      } else {
+        const data = await res.json();
+        alert(data.error || 'Failed to update status');
       }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setSubmitting(false);
+    } catch (e) {
+      console.error(e);
+      alert('Failed to update order status');
     }
   };
 
-  const updateStatus = async (newStatus: string) => {
-    if (!order) return;
-    
+  const handleRecordPayment = async () => {
+    if (paymentMode === 'Split' && (Number(cashAmount) + Number(onlineAmount) !== Number(paymentAmount))) {
+      alert('Split amounts must equal total payment amount.');
+      return;
+    }
+
+    if (paymentMode === 'Cash' && !paymentNotes.trim()) {
+      alert('Cash Order Notes are required for Cash payments.');
+      return;
+    }
+
+    // Validate denominations match cash amount for Cash mode
+    if (paymentMode === 'Cash') {
+      const denomTotal = denominations.reduce((sum, d) => sum + d.denomination * d.quantity, 0);
+      if (denomTotal > 0 && denomTotal !== paymentAmount) {
+        alert('Cash denominations total does not match payment amount.');
+        return;
+      }
+    }
+
     try {
-      await authFetch(`/api/orders/${order.id}`, {
-        method: 'PATCH',
+      const res = await authFetch('/api/settlements', {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          status: newStatus,
-          ...(newStatus === 'delivered' ? { deliveryDate: new Date().toISOString() } : {}),
+          orderId: Number(id),
+          customerId: order.customerId,
+          amount: paymentAmount,
+          cashAmount: paymentMode === 'Cash' ? paymentAmount : (paymentMode === 'Split' ? cashAmount : 0),
+          onlineAmount: ['Online', 'Cheque'].includes(paymentMode) ? paymentAmount : (paymentMode === 'Split' ? onlineAmount : 0),
+          paymentMode,
+          denominations: paymentMode === 'Cash' ? denominations : null,
+          referenceNumber: reference,
+          notes: paymentNotes,
         }),
       });
-      
-      setOrder({ ...order, status: newStatus });
-    } catch (err) {
-      console.error(err);
+
+      if (res.ok) {
+        const newSettlement = await res.json();
+        const totalPaid = order.payments.reduce((sum: number, p: any) => sum + Number(p.amount || 0), 0) + Number(paymentAmount);
+        const grandTotal = Number(order.summary.grandTotal || 0);
+        const balance = grandTotal - totalPaid;
+
+        setOrder({
+          ...order,
+          financials: {
+            paid: totalPaid,
+            balance,
+          },
+          payments: [...order.payments, {
+            id: `pay${Date.now()}`,
+            date: new Date().toISOString().split('T')[0],
+            amount: paymentAmount,
+            cash: paymentMode === 'Cash' ? paymentAmount : (paymentMode === 'Split' ? cashAmount : 0),
+            online: ['Online', 'Cheque'].includes(paymentMode) ? paymentAmount : (paymentMode === 'Split' ? onlineAmount : 0),
+            mode: paymentMode,
+            reference,
+            notes: paymentNotes,
+            denominations: paymentMode === 'Cash' ? denominations : undefined,
+          }],
+        });
+        setShowPaymentModal(false);
+        setPaymentMode('Cash');
+        setPaymentAmount(0);
+        setCashAmount(0);
+        setOnlineAmount(0);
+        setReference('');
+        setPaymentNotes('');
+        setDenominations([]);
+      } else {
+        const data = await res.json();
+        alert(data.error || 'Failed to record payment');
+      }
+    } catch (e) {
+      console.error(e);
+      alert('Failed to record payment');
     }
   };
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="w-8 h-8 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
+      <div className="space-y-6 animate-pulse">
+        <div className="flex gap-4">
+          <div className="h-10 w-10 bg-slate-700 rounded-full"></div>
+          <div className="h-10 w-48 bg-slate-700 rounded"></div>
+        </div>
+        <div className="h-48 glass-card rounded-xl bg-slate-800/50"></div>
+        <div className="h-64 glass-card rounded-xl bg-slate-800/50"></div>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="h-40 glass-card rounded-xl bg-slate-800/50"></div>
+          <div className="h-40 glass-card rounded-xl bg-slate-800/50"></div>
+        </div>
       </div>
     );
   }
 
-  if (!order) {
-    return (
-      <div className="text-center py-12">
-        <p className="text-slate-500">Order not found</p>
-        <Link href="/orders" className="text-emerald-600 hover:underline">Back to orders</Link>
-      </div>
-    );
-  }
-
-  const statusColors: Record<string, string> = {
-    pending: 'bg-amber-100 text-amber-700',
-    confirmed: 'bg-blue-100 text-blue-700',
-    delivered: 'bg-emerald-100 text-emerald-700',
-    cancelled: 'bg-red-100 text-red-700',
-  };
+  if (!order) return <div className="text-white">Order not found</div>;
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <Link href="/orders" className="text-sm text-slate-500 hover:text-emerald-600">← Back to orders</Link>
-          <h1 className="text-2xl font-bold text-slate-800 dark:text-white mt-1">{order.invoiceNumber}</h1>
-        </div>
-        <span className={`px-3 py-1 rounded-full text-sm font-medium ${statusColors[order.status]}`}>
-          {order.status}
-        </span>
+    <div className="space-y-6 pb-12 animate-fade-in relative">
+      <div className="flex items-center gap-4">
+        <Link href="/orders" className="p-2 rounded-full hover:bg-white/10 text-gray-400 hover:text-white transition-colors">
+          <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
+        </Link>
+        <h1 className="text-3xl font-bold text-white tracking-tight">Order Details</h1>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Main Content */}
-        <div className="lg:col-span-2 space-y-6">
-          {/* Order Info */}
-          <div className="bg-white dark:bg-slate-800 rounded-xl p-4 shadow-sm">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <p className="text-xs text-slate-500">Customer</p>
-                <p className="font-medium text-slate-800 dark:text-white">{order.customerName}</p>
-                {order.customerPhone && <p className="text-sm text-slate-500">📞 {order.customerPhone}</p>}
-              </div>
-              <div>
-                <p className="text-xs text-slate-500">Order Date</p>
-                <p className="font-medium text-slate-800 dark:text-white">{formatDate(order.orderDate)}</p>
-              </div>
-              <div>
-                <p className="text-xs text-slate-500">Salesperson</p>
-                <p className="font-medium text-slate-800 dark:text-white">{order.salespersonName}</p>
-              </div>
-              {order.beat && (
-                <div>
-                  <p className="text-xs text-slate-500">Beat</p>
-                  <p className="font-medium text-slate-800 dark:text-white">{order.beat}</p>
-                </div>
-              )}
-            </div>
+      {/* Header Card */}
+      <div className="glass-card p-6">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-white/10 pb-4 mb-4">
+          <div className="flex items-center gap-4">
+            <h2 className="text-2xl font-bold text-white">{order.id}</h2>
+            <span className={`px-3 py-1 text-sm font-medium rounded-full ${
+              order.status === 'Pending' ? 'bg-yellow-100 text-yellow-800' :
+              order.status === 'Confirmed' ? 'bg-blue-100 text-blue-800' :
+              order.status === 'Delivered' ? 'bg-green-100 text-green-800' :
+              'bg-red-100 text-red-800'
+            }`}>
+              {order.status}
+            </span>
+            <span className="text-sm text-gray-400">{new Date(order.date).toLocaleDateString('en-IN')}</span>
           </div>
+          
+          <div className="flex gap-2">
+            {order.status === 'Pending' && (
+              <button onClick={() => handleUpdateStatus('Confirmed')} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-colors shadow-lg shadow-blue-500/30">
+                Confirm Order
+              </button>
+            )}
+            {order.status === 'Confirmed' && (
+              <button onClick={() => handleUpdateStatus('Delivered')} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium rounded-lg transition-colors shadow-lg shadow-emerald-500/30">
+                Mark Delivered
+              </button>
+            )}
+            {['Pending', 'Confirmed'].includes(order.status) && (
+              <button onClick={() => handleUpdateStatus('Cancelled')} className="px-4 py-2 bg-rose-500/20 text-rose-400 hover:bg-rose-500/30 border border-rose-500/30 text-sm font-medium rounded-lg transition-colors">
+                Cancel
+              </button>
+            )}
+          </div>
+        </div>
 
-          {/* Items */}
-          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm overflow-hidden">
-            <div className="p-4 border-b border-slate-200 dark:border-slate-700">
-              <h3 className="font-semibold text-slate-800 dark:text-white">Order Items</h3>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-sm">
+          <div>
+            <p className="text-gray-400 mb-1">Customer Info</p>
+            <p className="font-bold text-white text-base">{order.customerName}</p>
+            <p className="text-gray-300">{order.customerPhone}</p>
+          </div>
+          <div>
+            <p className="text-gray-400 mb-1">Sales & Logistics</p>
+            <p className="text-white"><span className="text-gray-500">Rep:</span> {order.salesperson}</p>
+            <p className="text-white"><span className="text-gray-500">Beat:</span> {order.beat}</p>
+          </div>
+          <div>
+            <p className="text-gray-400 mb-1">Credit Terms</p>
+            <p className="text-white"><span className="text-gray-500">Days:</span> {order.creditDays}</p>
+            <p className="text-white"><span className="text-gray-500">Due:</span> {new Date(order.dueDate).toLocaleDateString('en-IN')}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Items Table */}
+      <div className="glass-card overflow-hidden">
+        <div className="p-4 border-b border-white/10 bg-slate-800/30">
+          <h3 className="font-bold text-white">Order Items</h3>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm text-gray-300">
+            <thead className="text-xs uppercase bg-slate-800/50 text-gray-400">
+              <tr>
+                <th className="px-4 py-3">#</th>
+                <th className="px-4 py-3">Product</th>
+                <th className="px-4 py-3 text-right">Qty</th>
+                <th className="px-4 py-3 text-right">Price</th>
+                <th className="px-4 py-3 text-right">Disc</th>
+                <th className="px-4 py-3 text-right">Taxable</th>
+                <th className="px-4 py-3 text-right">GST</th>
+                <th className="px-4 py-3 text-right font-bold text-white">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {order.items.map((item: any, i: number) => (
+                <tr key={i} className="border-b border-white/5 hover:bg-white/5">
+                  <td className="px-4 py-3">{i + 1}</td>
+                  <td className="px-4 py-3">
+                    <div className="font-medium text-white">{item.name}</div>
+                    <div className="text-xs text-gray-500">{item.erpId}</div>
+                  </td>
+                  <td className="px-4 py-3 text-right font-medium">{item.qty}</td>
+                  <td className="px-4 py-3 text-right">{formatCurrency(item.unitPrice)}</td>
+                  <td className="px-4 py-3 text-right text-rose-400">{item.discount > 0 ? `-${formatCurrency(item.discount)}` : '-'}</td>
+                  <td className="px-4 py-3 text-right">{formatCurrency(item.taxable)}</td>
+                  <td className="px-4 py-3 text-right">
+                    {formatCurrency(item.gstAmt)}<br/><span className="text-xs text-gray-500">@{item.gstRate}%</span>
+                  </td>
+                  <td className="px-4 py-3 text-right font-bold text-emerald-400">{formatCurrency(item.total)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Financials & Settlements */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        
+{/* Financial Summary */}
+         <div className="glass-card p-6 h-full flex flex-col">
+           <h3 className="font-bold text-white mb-4">Financial Summary</h3>
+           <div className="space-y-3 text-sm flex-1">
+             <div className="flex justify-between text-gray-300">
+               <span>Subtotal</span>
+               <span>{formatCurrency(order.summary.subtotal)}</span>
+             </div>
+             <div className="flex justify-between text-gray-300">
+               <span>Taxable Amount</span>
+               <span>{formatCurrency(order.summary.taxable)}</span>
+             </div>
+             <div className="flex justify-between text-gray-400">
+               <span>CGST</span>
+               <span>{formatCurrency(order.summary.cgst)}</span>
+             </div>
+             <div className="flex justify-between text-gray-400">
+               <span>SGST</span>
+               <span>{formatCurrency(order.summary.sgst)}</span>
+             </div>
+             <div className="flex justify-between text-gray-400">
+               <span>IGST</span>
+               <span>{formatCurrency(order.summary.igst)}</span>
+             </div>
+             <div className="flex justify-between font-medium text-gray-300">
+               <span>Total GST</span>
+               <span>{formatCurrency(order.summary.totalGst)}</span>
+             </div>
+             <div className="my-4 border-t border-white/10"></div>
+             
+             <div className="bg-slate-800/50 p-4 rounded-xl border border-white/5 space-y-2">
+               <div className="flex justify-between items-center">
+                 <span className="font-medium text-gray-300">Grand Total</span>
+                 <span className="text-xl font-bold text-white">{formatCurrency(order.summary.grandTotal)}</span>
+               </div>
+               <div className="flex justify-between items-center">
+                 <span className="text-emerald-400">Amount Paid</span>
+                 <span className="font-medium text-emerald-400">{formatCurrency(order.financials.paid)}</span>
+               </div>
+               <div className="flex justify-between items-center border-t border-white/10 pt-2 mt-2">
+                 <span className="font-bold text-white">Balance Due</span>
+                 <span className={`text-xl font-bold ${order.financials.balance > 0 ? 'text-rose-400' : 'text-gray-400'}`}>
+                   {formatCurrency(order.financials.balance)}
+                 </span>
+               </div>
+             </div>
+           </div>
+         </div>
+
+         {/* Cash Order Notes (Admin View) */}
+         {order.payments.some((p: any) => p.mode === 'Cash' && p.notes) && (
+           <div className="glass-card p-6 h-full flex flex-col">
+             <h3 className="font-bold text-white mb-4">Cash Order Notes</h3>
+             <div className="space-y-3 flex-1 overflow-y-auto">
+               {order.payments.filter((p: any) => p.mode === 'Cash' && p.notes).map((pay: any, i: number) => (
+                 <div key={i} className="bg-slate-800/50 p-3 rounded-xl border border-white/5">
+                   <div className="flex justify-between items-center mb-2">
+                     <span className="text-xs font-medium text-gray-400">{new Date(pay.date).toLocaleDateString('en-IN')}</span>
+                     <span className="text-xs font-bold text-emerald-400">{formatCurrency(pay.amount)}</span>
+                   </div>
+                   <p className="text-sm text-gray-300 whitespace-pre-wrap">{pay.notes}</p>
+                 </div>
+               ))}
+             </div>
+           </div>
+         )}
+
+         {/* Payment History */}
+        <div className="glass-card p-6 h-full flex flex-col">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="font-bold text-white">Payment History</h3>
+            {order.financials.balance > 0 && (
+              <button 
+                onClick={() => { setPaymentAmount(order.financials.balance); setShowPaymentModal(true); }}
+                className="btn-primary py-1.5 px-3 text-sm"
+              >
+                Record Payment
+              </button>
+            )}
+          </div>
+          
+          {order.payments.length === 0 ? (
+            <div className="flex-1 flex flex-col items-center justify-center text-gray-500 py-8">
+              <svg className="w-12 h-12 mb-2 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
+              <p>No payments recorded yet</p>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-slate-50 dark:bg-slate-700/50">
-                    <th className="px-4 py-2 text-left">Product</th>
-                    <th className="px-4 py-2 text-right">Qty</th>
-                    <th className="px-4 py-2 text-right">Rate</th>
-                    <th className="px-4 py-2 text-right">GST</th>
-                    <th className="px-4 py-2 text-right">Total</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                  {items.map(item => (
-                    <tr key={item.id}>
-                      <td className="px-4 py-2">
-                        <p className="text-slate-800 dark:text-white">{item.productName}</p>
-                        {item.erpId && <p className="text-xs text-slate-500 font-mono">{item.erpId}</p>}
-                      </td>
-                      <td className="px-4 py-2 text-right">{item.quantity} {item.unit}</td>
-                      <td className="px-4 py-2 text-right">{formatCurrency(item.unitPrice)}</td>
-                      <td className="px-4 py-2 text-right">{item.gstRate}%</td>
-                      <td className="px-4 py-2 text-right font-medium">{formatCurrency(item.totalAmount)}</td>
+          ) : (
+            <div className="overflow-x-auto flex-1">
+              <table className="w-full text-left text-sm text-gray-300">
+                  <thead className="text-xs uppercase bg-slate-800/50 text-gray-400 border-b border-white/10">
+ <tr>
+                      <th className="px-3 py-2">Date</th>
+                      <th className="px-3 py-2">Mode</th>
+                      <th className="px-3 py-2 text-right">Amount</th>
+                      <th className="px-3 py-2">Reference</th>
+                      <th className="px-3 py-2">Notes</th>
+                      <th className="px-3 py-2">Denominations</th>
                     </tr>
-                  ))}
-                </tbody>
+                  </thead>
+                  <tbody>
+                    {order.payments.map((pay: any, i: number) => (
+                      <tr key={i} className="border-b border-white/5 hover:bg-white/5">
+                        <td className="px-3 py-3 whitespace-nowrap">{new Date(pay.date).toLocaleDateString('en-IN')}</td>
+                        <td className="px-3 py-3">
+                          <span className="px-2 py-1 rounded-md text-xs bg-slate-700 font-medium">{pay.mode}</span>
+                        </td>
+                        <td className="px-3 py-3 text-right font-medium text-emerald-400">{formatCurrency(pay.amount)}</td>
+                        <td className="px-3 py-3 text-xs text-gray-400">{pay.reference || '-'}</td>
+                        <td className="px-3 py-3 text-xs text-gray-300 max-w-xs truncate">{pay.notes || '-'}</td>
+                        <td className="px-3 py-3">
+                          {pay.denominations && pay.denominations.length > 0 ? (
+                            <div className="flex flex-wrap gap-1">
+                              {pay.denominations.filter((d: any) => d.quantity > 0).map((d: any) => (
+                                <span key={d.denomination} className="px-1.5 py-0.5 bg-slate-700 text-slate-300 rounded text-xs">
+                                  ₹{d.denomination}×{d.quantity}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-slate-500">-</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
               </table>
-            </div>
-          </div>
-
-          {/* Settlement History */}
-          {settlements.length > 0 && (
-            <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm overflow-hidden">
-              <div className="p-4 border-b border-slate-200 dark:border-slate-700">
-                <h3 className="font-semibold text-slate-800 dark:text-white">Settlement History</h3>
-              </div>
-              <div className="divide-y divide-slate-100 dark:divide-slate-700">
-                {settlements.map(s => (
-                  <div key={s.id} className="p-4 flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-slate-600 dark:text-slate-400">{formatDate(s.settledAt)}</p>
-                      <p className="text-xs text-slate-500 uppercase">{s.paymentMode}</p>
-                    </div>
-                    <p className="font-medium text-emerald-600">{formatCurrency(s.amount)}</p>
-                  </div>
-                ))}
-              </div>
             </div>
           )}
         </div>
-
-        {/* Sidebar */}
-        <div className="space-y-6">
-          {/* Totals */}
-          <div className="bg-white dark:bg-slate-800 rounded-xl p-4 shadow-sm">
-            <h3 className="font-semibold text-slate-800 dark:text-white mb-4">Order Summary</h3>
-            <div className="space-y-2 text-sm">
-              <div className="flex justify-between">
-                <span className="text-slate-500">Subtotal</span>
-                <span>{formatCurrency(order.subtotal)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">CGST</span>
-                <span>{formatCurrency(order.cgst)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">SGST</span>
-                <span>{formatCurrency(order.sgst)}</span>
-              </div>
-              <div className="border-t pt-2 flex justify-between font-medium">
-                <span>Grand Total</span>
-                <span className="text-emerald-600">{formatCurrency(order.grandTotal)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Paid</span>
-                <span className="text-emerald-600">{formatCurrency(order.amountPaid)}</span>
-              </div>
-              <div className="flex justify-between font-medium">
-                <span>Balance</span>
-                <span className={order.balance > 0 ? 'text-red-600' : 'text-emerald-600'}>
-                  {formatCurrency(order.balance)}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Actions */}
-          <div className="bg-white dark:bg-slate-800 rounded-xl p-4 shadow-sm space-y-3">
-            <h3 className="font-semibold text-slate-800 dark:text-white">Actions</h3>
-            
-            {order.balance > 0 && (
-              <button
-                onClick={() => setShowSettlement(true)}
-                className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium transition-colors"
-              >
-                💰 Record Payment
-              </button>
-            )}
-            
-            {order.status === 'pending' && (
-              <button
-                onClick={() => updateStatus('confirmed')}
-                className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors"
-              >
-                ✅ Confirm Order
-              </button>
-            )}
-            
-            {order.status === 'confirmed' && (
-              <button
-                onClick={() => updateStatus('delivered')}
-                className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium transition-colors"
-              >
-                🚚 Mark Delivered
-              </button>
-            )}
-
-            {(user?.role === 'admin' || user?.role === 'manager') && (
-              <button
-                onClick={async () => {
-                  if (confirm(`Delete order ${order.invoiceNumber}?`)) {
-                    const res = await authFetch(`/api/orders/${order.id}`, { method: 'DELETE' });
-                    if (res.ok) router.push('/orders');
-                    else alert('Delete failed');
-                  }
-                }}
-                className="w-full py-2 border border-red-200 text-red-500 hover:bg-red-50 rounded-lg text-sm font-medium transition-colors"
-              >
-                🗑️ Delete Order
-              </button>
-            )}
-          </div>
-        </div>
       </div>
 
-      {/* Settlement Modal */}
-      {showSettlement && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-md">
-            <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-slate-800 dark:text-white">Record Payment</h2>
-              <button onClick={() => setShowSettlement(false)} className="text-slate-400">✕</button>
-            </div>
+      {/* Payment Modal Overlay */}
+      {showPaymentModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+          <div className="glass-card max-w-md w-full p-6 shadow-2xl border border-white/10">
+            <h2 className="text-xl font-bold text-white mb-4">Record Payment</h2>
             
-            <form onSubmit={handleSettlement} className="p-4 space-y-4 max-h-[75vh] overflow-y-auto">
+            <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                  Total Amount (Balance: {formatCurrency(order.balance)})
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  max={order.balance}
-                  required
-                  value={settlementData.amount}
-                  onChange={(e) => setSettlementData({ ...settlementData, amount: e.target.value })}
-                  className="w-full px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white font-bold"
-                />
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1 font-bold">Payment Mode</label>
-                <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
-                  {[
-                    { id: 'cash', label: '💵 Cash', color: 'border-emerald-500' },
-                    { id: 'online', label: '📱 Online', color: 'border-blue-500' },
-                    { id: 'cheque', label: '🏦 Cheque', color: 'border-amber-600' },
-                    { id: 'credit_note', label: '📝 CN', color: 'border-red-500' },
-                    { id: 'split', label: '🌓 Split', color: 'border-purple-500' },
-                  ].map(m => (
+                <label className="text-sm font-medium text-gray-300 mb-1 block">Payment Mode</label>
+                <div className="grid grid-cols-4 gap-2">
+                  {['Cash', 'Online', 'Cheque', 'Split'].map(mode => (
                     <button
-                      key={m.id}
+                      key={mode}
                       type="button"
-                      onClick={() => setSettlementData({ ...settlementData, paymentMode: m.id })}
-                      className={`py-2 px-2 text-[10px] font-black rounded-lg border-2 transition-all ${
-                        settlementData.paymentMode === m.id
-                          ? `${m.color} bg-slate-50 dark:bg-slate-700`
-                          : 'border-slate-200 dark:border-slate-700 text-slate-400'
+                      onClick={() => setPaymentMode(mode)}
+                      className={`py-2 text-sm rounded-lg border font-medium transition-colors ${
+                        paymentMode === mode 
+                          ? 'bg-indigo-600 border-indigo-500 text-white' 
+                          : 'bg-slate-800 border-white/10 text-gray-400 hover:bg-slate-700'
                       }`}
                     >
-                      {m.label}
+                      {mode}
                     </button>
                   ))}
                 </div>
               </div>
 
-              {(settlementData.paymentMode === 'cheque' || settlementData.paymentMode === 'credit_note') && (
-                <div className="bg-amber-50 dark:bg-amber-900/10 p-3 rounded-lg border border-amber-100 dark:border-amber-800">
-                  <label className="block text-[10px] font-bold text-amber-700 dark:text-amber-400 uppercase mb-1">
-                    Timing Details (Days to settle)
-                  </label>
-                  <div className="flex items-center gap-3">
-                    <input
-                      type="number"
-                      required
-                      value={settlementData.clearingDays}
-                      onChange={(e) => setSettlementData({ ...settlementData, clearingDays: e.target.value })}
-                      className="w-20 px-3 py-1.5 border border-amber-300 dark:border-amber-600 rounded bg-white dark:bg-slate-800 text-slate-800 dark:text-white font-bold"
-                    />
-                    <span className="text-xs text-amber-600 dark:text-amber-400 font-medium">Days from today</span>
-                  </div>
-                  <p className="text-[9px] text-amber-500 mt-2 italic">Expected settling date: {new Date(Date.now() + parseInt(settlementData.clearingDays || '0') * 86400000).toLocaleDateString()}</p>
-                </div>
-              )}
-
-              {settlementData.paymentMode === 'split' && (
-                <div className="bg-purple-50 dark:bg-purple-900/10 p-3 rounded-lg border border-purple-100 dark:border-purple-800">
-                  <p className="text-[10px] text-purple-600 dark:text-purple-400 font-bold uppercase mb-2">Split Breakdown</p>
-                  <div className="flex gap-4">
-                    <div className="flex-1">
-                      <p className="text-xs text-slate-400 mb-1">Cash Part</p>
-                      <p className="font-bold text-slate-800 dark:text-white">{formatCurrency(cashTotal)}</p>
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-xs text-slate-400 mb-1">Online Part</p>
-                      <p className="font-bold text-slate-800 dark:text-white">{formatCurrency(parseFloat(settlementData.amount || '0') - cashTotal)}</p>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {(settlementData.paymentMode === 'cash' || settlementData.paymentMode === 'split') && (
-                <DenominationCalculator 
-                  targetAmount={settlementData.paymentMode === 'cash' ? parseFloat(settlementData.amount || '0') : undefined}
-                  onTotalChange={(total, counts) => {
-                    setCashTotal(total);
-                    setDenominationCounts(counts);
-                  }} 
-                />
-              )}
-              
-              {settlementData.paymentMode !== 'cash' && (
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1 text-xs">Ref # (UPI / Bank / Cheque No)</label>
-                  <input
-                    type="text"
-                    value={settlementData.referenceNumber}
-                    onChange={(e) => setSettlementData({ ...settlementData, referenceNumber: e.target.value })}
-                    placeholder="Transaction ID / UTR / Cheque #"
-                    className="w-full px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white text-sm"
-                  />
-                </div>
-              )}
-
               <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1 text-xs font-bold">Internal Note</label>
-                <textarea
-                  value={settlementData.notes}
-                  onChange={(e) => setSettlementData({ ...settlementData, notes: e.target.value })}
-                  placeholder="Add any specific details about this collection..."
-                  rows={2}
-                  className="w-full px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white text-sm"
+                <label className="text-sm font-medium text-gray-300 mb-1 block">Total Amount (₹)</label>
+                <input 
+                  type="number" 
+                  className="input-field w-full text-lg font-bold"
+                  value={paymentAmount}
+                  onChange={e => setPaymentAmount(Number(e.target.value))}
                 />
               </div>
-              
-              <div className="flex gap-3 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setShowSettlement(false)}
-                  className="flex-1 py-2 border border-slate-300 dark:border-slate-600 rounded-lg"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg disabled:opacity-50"
-                >
-                  {submitting ? 'Recording...' : 'Record Payment'}
-                </button>
-              </div>
-            </form>
+
+              {paymentMode === 'Split' && (
+                <div className="grid grid-cols-2 gap-4 p-4 bg-slate-800/50 rounded-xl border border-white/5">
+                  <div>
+                    <label className="text-xs font-medium text-gray-400 mb-1 block">Cash Portion</label>
+                    <input type="number" className="input-field w-full" value={cashAmount} onChange={e => setCashAmount(Number(e.target.value))} />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-400 mb-1 block">Online Portion</label>
+                    <input type="number" className="input-field w-full" value={onlineAmount} onChange={e => setOnlineAmount(Number(e.target.value))} />
+                  </div>
+                </div>
+              )}
+
+              {paymentMode === 'Cash' && (
+                <CashDenominationInput amount={paymentAmount} onChange={setDenominations} />
+              )}
+
+              {['Online', 'Cheque', 'Split'].includes(paymentMode) && (
+                <div>
+                  <label className="text-sm font-medium text-gray-300 mb-1 block">Reference / UTR Number</label>
+                  <input type="text" className="input-field w-full" value={reference} onChange={e => setReference(e.target.value)} placeholder="e.g. UPI transaction ID" />
+                </div>
+              )}
+
+              {paymentMode === 'Cash' && (
+                <div>
+                  <label className="text-sm font-medium text-gray-300 mb-1 block">Cash Order Notes <span className="text-rose-400">*</span></label>
+                  <textarea className="input-field w-full h-24" value={paymentNotes} onChange={e => setPaymentNotes(e.target.value)} placeholder="Enter cash transaction details for auditing..." required></textarea>
+                </div>
+              )}
+
+              {paymentMode !== 'Cash' && (
+                <div>
+                  <label className="text-sm font-medium text-gray-300 mb-1 block">Notes</label>
+                  <textarea className="input-field w-full h-20" value={paymentNotes} onChange={e => setPaymentNotes(e.target.value)} placeholder="Optional notes..."></textarea>
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-3 mt-6">
+              <button 
+                onClick={() => setShowPaymentModal(false)}
+                className="flex-1 py-2.5 rounded-lg border border-white/10 text-gray-300 hover:bg-white/5 transition-colors font-medium text-sm"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={handleRecordPayment}
+                className="flex-1 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white transition-colors font-medium text-sm shadow-lg shadow-emerald-500/30"
+              >
+                Save Payment
+              </button>
+            </div>
           </div>
         </div>
       )}

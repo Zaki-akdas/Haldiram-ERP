@@ -1,37 +1,55 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseAdmin } from '@/db';
-import { getCurrentUser } from '@/lib/auth';
+import { getCurrentUser, isManager } from '@/lib/auth';
+import { db } from '@/db';
+import { activityLogs } from '@/db/schema';
+import { eq, desc, and, gte, lte, count } from 'drizzle-orm';
 
-export const dynamic = 'force-dynamic';
-
-export async function GET(request: NextRequest) {
+export async function GET(req: NextRequest) {
   try {
-    const supabase = getSupabaseAdmin();
     const user = await getCurrentUser();
-    if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    if (!isManager(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
-    const { searchParams } = new URL(request.url);
-    const page = parseInt(searchParams.get('page') || '1', 10);
-    const limit = parseInt(searchParams.get('limit') || '50', 10);
+    const searchParams = req.nextUrl.searchParams;
+    const page = parseInt(searchParams.get('page') || '1');
+    const limit = parseInt(searchParams.get('limit') || '20');
+    const userId = searchParams.get('userId');
+    const activityType = searchParams.get('activityType');
+    const startDate = searchParams.get('startDate');
+    const endDate = searchParams.get('endDate');
+
     const offset = (page - 1) * limit;
-    const isAdmin = user.role === 'admin';
+    const conditions = [];
 
-    let query = supabase
-      .from('activity_logs')
-      .select('*', { count: 'exact' })
-      .order('created_at', { ascending: false });
+    if (userId) conditions.push(eq(activityLogs.userId, Number(userId)));
+    if (activityType) conditions.push(eq(activityLogs.activityType, activityType as typeof activityLogs.activityType.enumValues[number]));
+    
+    if (startDate) conditions.push(gte(activityLogs.createdAt, new Date(startDate)));
+    if (endDate) conditions.push(lte(activityLogs.createdAt, new Date(endDate)));
 
-    if (!isAdmin) query = query.eq('user_id', user.id);
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
-    const { data: logs, count, error } = await query.range(offset, offset + limit - 1);
-    if (error) throw error;
+    const [{ total }] = await db
+      .select({ total: count() })
+      .from(activityLogs)
+      .where(whereClause);
+
+    const data = await db
+      .select()
+      .from(activityLogs)
+      .where(whereClause)
+      .limit(limit)
+      .offset(offset)
+      .orderBy(desc(activityLogs.createdAt));
 
     return NextResponse.json({
-      logs: logs || [],
-      pagination: { page, limit, total: count || 0, totalPages: Math.ceil((count || 0) / limit) },
+      activities: data,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit)
     });
   } catch (error) {
-    console.error('Activity logs error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: (error as Error).message }, { status: 500 });
   }
 }

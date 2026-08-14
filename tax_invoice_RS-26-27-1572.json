@@ -1,0 +1,77 @@
+{
+  "invoice": {
+    "invoice_number": "RS/26-27/1572",
+    "bill_date": "2026-07-22T10:35:00+05:30",
+    "sales_order_number": "SO/41103/1683"
+  },
+  "seller": {
+    "firm_name": "RAJSHREE SNACKS AND FOODS PRIVATE LIMITED",
+    "address": "KHASRA NO 725/1/1 GRAM PIPALIYA JAHEER, Bhopal-462010",
+    "city": "Bhopal",
+    "state": "MADHYA PRADESH",
+    "state_code": "23",
+    "gstin": "23AAPCR5371M1ZT",
+    "pan": "AAPCR5371M",
+    "email": "Rajshreesnacksandfoods@gmail.com",
+    "fssai": "11423010000093"
+  },
+  "buyer": {
+    "firm_name": "PRO SWAMI (SHARNAM ENTERPRISES)",
+    "address": "17-B, D Sector, Govindpura Industrial Area, Bhopal, Madhya Pradesh 462023, India",
+    "city": "BHOPAL",
+    "state": "MADHYA PRADESH",
+    "state_code": "23",
+    "pincode": "462022 / 462010",
+    "mobile": "9589408202",
+    "gstin": "23AMFPV5397L1ZB",
+    "pan": "AMFPV5397L"
+  },
+  "items": [
+    { "sno": 1, "erp_id": "FD020400500900000D", "item_name": "Chana Jor Garam MRP 10/50 GM 9 KG NGP", "hsn": 21069099, "mrp": 10.00, "taxable_value": 1382.26, "gst_percent": 5, "gst_amount": 69.12, "total_value": 1451.38 },
+    { "sno": 2, "erp_id": "FI001800550396001D", "item_name": "Chips Cream N Onion MRP 20/55 GM 3.96 KG", "hsn": 20052000, "mrp": 20.00, "taxable_value": 970.38, "gst_percent": 5, "gst_amount": 48.52, "total_value": 1018.90 },
+    { "sno": 3, "erp_id": "FN090200300096000D", "item_name": "Cream Cone Vanilla 30 GM", "hsn": 21069099, "mrp": 10.00, "taxable_value": 250.01, "gst_percent": 5, "gst_amount": 12.50, "total_value": 262.51 },
+    { "sno": 4, "erp_id": "FH0390050016000000", "item_name": "Gulab Jamun 500 GM 16 KG NGP", "hsn": 21069099, "mrp": 125.00, "taxable_value": 3071.70, "gst_percent": 5, "gst_amount": 153.58, "total_value": 3225.28 },
+    { "sno": 5, "erp_id": "FD040804000800001D", "item_name": "Instant Bhel 400 GM", "hsn": 21069099, "mrp": 95.00, "taxable_value": 1459.06, "gst_percent": 5, "gst_amount": 72.96, "total_value": 1532.02 },
+    { "sno": 6, "erp_id": "FD040800410836400D", "item_name": "Instant Bhel MRP 10/41 GM 8.364 KG", "hsn": 21069099, "mrp": 10.00, "taxable_value": 6266.31, "gst_percent": 5, "gst_amount": 313.32, "total_value": 6579.63 },
+    { "sno": 7, "erp_id": "FD045702000480000D", "item_name": "Khari Boondi 200 Gm 4.8Kg", "hsn": 21069099, "mrp": 55.00, "taxable_value": 1013.66, "gst_percent": 5, "gst_amount": 50.68, "total_value": 1064.34 },
+    { "sno": 8, "erp_id": "FE056100341020020", "item_name": "Masala Peanut MRP 10/34 GM*10.2 KG (NGP)", "hsn": 20081100, "mrp": 10.00, "taxable_value": 2303.76, "gst_percent": 5, "gst_amount": 115.18, "total_value": 2418.94 },
+    { "sno": 9, "erp_id": "FD050200240460800D", "item_name": "Masala Sev Murmura MRP 5 24G*4.608 (NGP)", "hsn": 21069099, "mrp": 5.00, "taxable_value": 7331.33, "gst_percent": 5, "gst_amount": 366.56, "total_value": 7697.89 },
+    { "sno": 10, "erp_id": "FD058800350840000D", "item_name": "Mini Bhakharwadi MRP 10/35 GM 8.4 KG", "hsn": 21069099, "mrp": 10.00, "taxable_value": 1843.01, "gst_percent": 5, "gst_amount": 92.16, "total_value": 1935.17 },
+    { "sno": 11, "erp_id": "FD059100240345600D", "item_name": "Mini Punjabi Papad MRP 10 24G*3.456 KG", "hsn": 21069099, "mrp": 10.00, "taxable_value": 1105.80, "gst_percent": 5, "gst_amount": 55.30, "total_value": 1161.10 },
+    { "sno": 12, "erp_id": "FD059302000400002D", "item_name": "Mini Samosa 200 GM*4.0 KG (NGP)", "hsn": 21069099, "mrp": 70.00, "taxable_value": 1075.10, "gst_percent": 5, "gst_amount": 53.76, "total_value": 1128.86 },
+    { "sno": 13, "erp_id": "FD063100230690000D", "item_name": "Panchrattan MRP 10/23 GM 6.9 KG", "hsn": 21069099, "mrp": 10.00, "taxable_value": 20734.11, "gst_percent": 5, "gst_amount": 1036.70, "total_value": 21770.81 },
+    { "sno": 14, "erp_id": "FD073700400576000D", "item_name": "Papdi Gathiya MRP 10/40 GM*5.76 KG", "hsn": 21069099, "mrp": 10.00, "taxable_value": 2211.64, "gst_percent": 5, "gst_amount": 110.58, "total_value": 2322.22 },
+    { "sno": 15, "erp_id": "FH0761050016000000", "item_name": "Rasgulla 500 GM*16 KG NGP", "hsn": 21069099, "mrp": 125.00, "taxable_value": 6143.40, "gst_percent": 5, "gst_amount": 307.18, "total_value": 6450.58 },
+    { "sno": 16, "erp_id": "FE081202000480001D", "item_name": "Salted Peanut 200 GM 4.80 KG (NGP)", "hsn": 20081100, "mrp": 60.00, "taxable_value": 4423.26, "gst_percent": 5, "gst_amount": 221.16, "total_value": 4644.42 },
+    { "sno": 17, "erp_id": "FH083702501800002D", "item_name": "Soan Papdi Regular 250 GM 18 KG NGP", "hsn": 21069099, "mrp": 75.00, "taxable_value": 4146.80, "gst_percent": 5, "gst_amount": 207.34, "total_value": 4354.14 },
+    { "sno": 18, "erp_id": "FQ050200250600000D", "item_name": "Woka Instant Noodles MRP 5/25 GM 6.0 KG", "hsn": 21069099, "mrp": 5.00, "taxable_value": 1833.02, "gst_percent": 5, "gst_amount": 91.66, "total_value": 1924.68 },
+    { "sno": 19, "erp_id": "FQ050200550792000D", "item_name": "Woka Instant Noodles MRP10 55 GM 7.92 KG", "hsn": 19021900, "mrp": 10.00, "taxable_value": 2199.60, "gst_percent": 5, "gst_amount": 109.98, "total_value": 2309.58 }
+  ],
+  "summary": {
+    "gross_amount": 69764.21,
+    "trade_discount": 0.00,
+    "primary_discount": 0.00,
+    "secondary_discount": 0.00,
+    "taxable_value": 69764.21,
+    "cgst_amount": 1744.12,
+    "sgst_amount": 1744.12,
+    "utgst_amount": 0.00,
+    "igst_amount": 0.00,
+    "gst_amount": 3488.24,
+    "cess": 0.00,
+    "round_off": 0.45,
+    "total_value": 73252.00,
+    "total_in_words": "Seventy Three Thousand Two Hundred Fifty Two Rupees Only"
+  },
+  "verification": {
+    "taxable_value_sum": 69764.21,
+    "taxable_value_matches_summary": true,
+    "gst_amount_sum": 3488.24,
+    "gst_calculation_verified": true,
+    "total_value_sum": 73252.45,
+    "round_off": 0.45,
+    "final_total": 73252.00,
+    "cgst_sgst_split": "1744.12 + 1744.12 = 3488.24",
+    "notes": "Same-state transaction (both Bhopal, MP). All 19 items use 5% GST rate. Columns Std Unit, Cases, Qty, PTR, Price/Std could not be reliably parsed from OCR-extracted text and are excluded."
+  }
+}

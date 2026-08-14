@@ -1,26 +1,27 @@
-import type { Metadata } from "next";
-import { Inter, Space_Grotesk } from "next/font/google";
-import type { ReactNode } from "react";
-import { AuthProvider } from "@/components/AuthProvider";
-import "./globals.css";
+import type { Metadata } from 'next';
+import { Inter, Space_Grotesk } from 'next/font/google';
+import './globals.css';
+import { AuthProvider } from '@/components/AuthProvider';
 
-const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
-const display = Space_Grotesk({ subsets: ["latin"], variable: "--font-display" });
+const inter = Inter({ subsets: ['latin'], variable: '--font-inter' });
+const spaceGrotesk = Space_Grotesk({ subsets: ['latin'], variable: '--font-space-grotesk' });
 
 export const metadata: Metadata = {
-  title: "Swami Sharanam - Sales Order Distribution & Settlement",
-  description: "AI-powered sales order distribution, delivery, and cash settlement management system",
+  title: 'Swami Sharanam',
+  description: 'AI-powered ERP for sales distribution management',
   icons: {
-    icon: "/logo-icon.svg",
-    shortcut: "/logo-icon.svg",
-    apple: "/logo-icon.svg",
+    icon: '/logo-icon.svg',
   },
 };
 
-export default function RootLayout({ children }: { children: ReactNode }) {
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${inter.variable} ${display.variable} min-h-screen bg-slate-100 text-slate-900 antialiased`}>
+      <body className={`${inter.className} ${spaceGrotesk.variable} antialiased`}>
         <AuthProvider>
           {children}
         </AuthProvider>

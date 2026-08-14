@@ -1,87 +1,106 @@
-import { NextResponse } from 'next/server';
-import { getSupabaseAdmin } from '@/db';
-import { getCurrentUser } from '@/lib/auth';
-
-export const dynamic = 'force-dynamic';
+import { NextRequest, NextResponse } from 'next/server';
+import { getCurrentUser, isManager } from '@/lib/auth';
+import { db } from '@/db';
+import { orders, customers, users } from '@/db/schema';
+import { eq, desc, and, ne, sql, count } from 'drizzle-orm';
 
 export async function GET() {
   try {
-    const supabase = getSupabaseAdmin();
     const user = await getCurrentUser();
-    if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const today = new Date();
-    const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-    const startOfToday = new Date();
-    startOfToday.setHours(0, 0, 0, 0);
+    const orderConditions = user.role === 'salesperson' ? [eq(orders.salespersonId, user.id)] : [];
+    const customerConditions = user.role === 'salesperson' ? [eq(customers.assignedSalespersonId, user.id)] : [];
+    
+    const orderWhere = orderConditions.length > 0 ? and(...orderConditions) : undefined;
+    const customerWhere = customerConditions.length > 0 ? and(...customerConditions) : undefined;
 
-    const isAdmin = user.role === 'admin';
-    const isManager = user.role === 'manager' || user.role === 'admin';
+    const [{ totalOrders }] = await db.select({ totalOrders: count() }).from(orders).where(orderWhere);
+    const [{ totalCustomers }] = await db.select({ totalCustomers: count() }).from(customers).where(customerWhere);
 
-    const orderQuery = supabase.from('orders').select('status, grand_total, amount_paid, balance, order_date');
-    if (!isAdmin) orderQuery.eq('salesperson_id', user.id);
-    const { data: allOrders } = await orderQuery;
+    const [{ totalRevenue }] = await db
+      .select({ totalRevenue: sql<number>`sum(CAST(${orders.grandTotal} AS DECIMAL))` })
+      .from(orders)
+      .where(orderWhere);
 
-    const totalOrders = allOrders?.length || 0;
-    const pendingOrders = allOrders?.filter((o: any) => o.status === 'pending').length || 0;
-    const deliveredOrders = allOrders?.filter((o: any) => o.status === 'delivered').length || 0;
-    const todayOrders = allOrders?.filter((o: any) => new Date(o.order_date) >= startOfToday) || [];
-    const monthlyOrders = allOrders?.filter((o: any) => new Date(o.order_date) >= startOfMonth) || [];
+    const [{ totalCollected }] = await db
+      .select({ totalCollected: sql<number>`sum(CAST(${orders.amountPaid} AS DECIMAL))` })
+      .from(orders)
+      .where(orderWhere);
 
-    const customerQuery = supabase.from('customers').select('id, is_active, assigned_salesperson_id');
-    if (!isAdmin) customerQuery.eq('assigned_salesperson_id', user.id);
-    const { data: customersData } = await customerQuery;
+    const pendingConditions = [...orderConditions, ne(orders.settlementStatus, 'settled')];
+    const [{ pendingSettlements }] = await db
+      .select({ pendingSettlements: count() })
+      .from(orders)
+      .where(and(...pendingConditions));
 
-    const { count: totalProducts } = await supabase.from('products').select('*', { count: 'exact', head: true });
-    const { count: activeProducts } = await supabase.from('products').select('*', { count: 'exact', head: true }).eq('is_active', true);
+    // For simplicity, just joining with a subquery or doing a second query
+const recentOrdersRaw = await db
+       .select({
+         id: orders.id,
+         invoiceNumber: orders.invoiceNumber,
+         customerId: orders.customerId,
+         salespersonId: orders.salespersonId,
+         orderDate: orders.orderDate,
+         status: orders.status,
+         grandTotal: orders.grandTotal,
+         amountPaid: orders.amountPaid,
+         balance: orders.balance,
+         createdAt: orders.createdAt,
+         customerName: customers.name,
+         customerPhone: customers.phone,
+         salespersonName: users.name,
+       })
+       .from(orders)
+       .leftJoin(customers, eq(orders.customerId, customers.id))
+       .leftJoin(users, eq(orders.salespersonId, users.id))
+       .where(orderWhere)
+       .orderBy(desc(orders.createdAt))
+       .limit(5);
 
-    const { data: recentOrdersData } = await supabase
-      .from('orders')
-      .select('id, invoice_number, grand_total, status, order_date, customers(name)')
-      .order('order_date', { ascending: false })
-      .limit(5);
+    const recentOrders = recentOrdersRaw.map((order) => ({
+      ...order,
+      customer: order.customerName ? { name: order.customerName, phone: order.customerPhone } : { name: `Customer #${order.customerId}` },
+      salesperson: order.salespersonName ? { name: order.salespersonName } : undefined,
+    }));
 
-    const { data: pendingSettlementsData } = await supabase
-      .from('orders')
-      .select('id, invoice_number, balance, order_date, customers(name)')
-      .gt('balance', 0)
-      .order('order_date', { ascending: false })
-      .limit(5);
+    const activeReceivables = await db
+      .select()
+      .from(orders)
+      .where(and(...orderConditions, sql`CAST(${orders.balance} AS DECIMAL) > 0`))
+      .orderBy(desc(sql`CAST(${orders.balance} AS DECIMAL)`))
+      .limit(10);
 
-    let salespersonStats: any[] = [];
-    if (isManager) {
-      const { data: usersData } = await supabase.from('users').select('id, name');
-      salespersonStats = (usersData || []).map((u: any) => {
-        const salespersonOrders = allOrders?.filter((o: any) => o.salesperson_id === u.id) || [];
-        const revenue = salespersonOrders.reduce((sum: number, o: any) => sum + Number(o.grand_total || 0), 0);
-        return { id: u.id, name: u.name, orders: salespersonOrders.length, revenue };
-      }).sort((a: any, b: any) => b.revenue - a.revenue).slice(0, 10);
+    let salespeoplePerformance: any[] = [];
+    if (isManager(user.role)) {
+      const salespeople = await db.select().from(users).where(eq(users.role, 'salesperson'));
+      
+      salespeoplePerformance = await Promise.all(
+        salespeople.map(async (sp) => {
+          const [{ spOrderCount }] = await db.select({ spOrderCount: count() }).from(orders).where(eq(orders.salespersonId, sp.id));
+          const [{ spTotalRevenue }] = await db.select({ spTotalRevenue: sql<number>`sum(CAST(${orders.grandTotal} AS DECIMAL))` }).from(orders).where(eq(orders.salespersonId, sp.id));
+          
+          return {
+            id: sp.id,
+            name: sp.name,
+            orderCount: spOrderCount,
+            totalRevenue: spTotalRevenue || 0
+          };
+        })
+      );
     }
 
     return NextResponse.json({
-      stats: {
-        todayOrders: todayOrders.length,
-        todayRevenue: todayOrders.reduce((sum: number, o: any) => sum + Number(o.grand_total || 0), 0),
-        todayPending: todayOrders.reduce((sum: number, o: any) => sum + Number(o.balance || 0), 0),
-        todayCollected: todayOrders.reduce((sum: number, o: any) => sum + Number(o.amount_paid || 0), 0),
-        totalOrders,
-        pendingOrders,
-        deliveredOrders,
-        totalRevenue: allOrders?.reduce((sum: number, o: any) => sum + Number(o.grand_total || 0), 0) || 0,
-        monthlyOrders: monthlyOrders.length,
-        monthlyRevenue: monthlyOrders.reduce((sum: number, o: any) => sum + Number(o.grand_total || 0), 0),
-        monthlyCollected: monthlyOrders.reduce((sum: number, o: any) => sum + Number(o.amount_paid || 0), 0),
-        totalCustomers: customersData?.length || 0,
-        activeCustomers: customersData?.filter((c: any) => c.is_active).length || 0,
-        totalProducts: totalProducts || 0,
-        activeProducts: activeProducts || 0,
-      },
-      recentOrders: (recentOrdersData || []).map((o: any) => ({ ...o, grandTotal: Number(o.grand_total || 0), customerName: o.customers?.name })),
-      pendingSettlements: (pendingSettlementsData || []).map((s: any) => ({ ...s, balance: Number(s.balance || 0), customerName: s.customers?.name })),
-      salespersonStats,
+      totalOrders,
+      totalCustomers,
+      totalRevenue: totalRevenue || 0,
+      totalCollected: totalCollected || 0,
+      pendingSettlements,
+      recentOrders,
+      activeReceivables,
+      ...(isManager(user.role) && { salespeoplePerformance })
     });
   } catch (error) {
-    console.error('Dashboard error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: (error as Error).message }, { status: 500 });
   }
 }

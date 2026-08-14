@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /api/auth/
+Disallow: /api/seed/
+
+Sitemap: https://haldiram-erp.vercel.app/sitemap.xml

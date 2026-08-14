@@ -1,150 +1,190 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useAuth } from '@/components/AuthProvider';
 
 export default function SignupPage() {
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [phone, setPhone] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [role, setRole] = useState<'salesperson' | 'admin'>('salesperson');
+  const router = useRouter();
+  const { user, loading } = useAuth();
+  const [formData, setFormData] = useState({
+    name: '',
+    email: '',
+    password: '',
+    phone: '',
+    role: 'salesperson',
+  });
   const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
-  const { login } = useAuth();
+  const [success, setSuccess] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  
+  const { authFetch } = useAuth();
+
+  // Account creation is admin-only (see /api/auth/signup). Non-admins are sent back to login.
+  useEffect(() => {
+    if (!loading && (!user || user.role !== 'admin')) {
+      router.replace('/login');
+    }
+  }, [user, loading, router]);
+
+  if (loading || !user || user.role !== 'admin') {
+    return null;
+  }
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    setFormData({ ...formData, [e.target.name]: e.target.value });
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setIsLoading(true);
 
-    if (!name || !email || !password || !role) {
-      setError('Please fill in all required fields');
-      return;
-    }
-
-    if (password !== confirmPassword) {
-      setError('Passwords do not match');
-      return;
-    }
-
-    if (password.length < 6) {
-      setError('Password must be at least 6 characters');
-      return;
-    }
-
-    setLoading(true);
     try {
-      const res = await fetch('/api/auth/signup', {
+      const response = await authFetch('/api/auth/signup', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, email, password, role, phone }),
+        body: JSON.stringify(formData),
       });
+      
+if (!response.ok) {
+         const data = await response.json();
+         throw new Error(data.error || 'Failed to create account');
+       }
 
-      const data = await res.json();
-
-      if (!res.ok) {
-        setError(data.error || 'Failed to create account');
-        return;
-      }
-
-      const loginResult = await login(email, password);
-      if (loginResult.success) {
-        window.location.href = '/dashboard';
-      } else {
-        setError(loginResult.error || 'Account created but login failed. Please try logging in.');
-      }
-    } catch {
-      setError('Network error. Please try again.');
+      setSuccess(true);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'An error occurred during signup');
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
   };
 
-  const inputClass = "w-full rounded-2xl border border-slate-200 bg-slate-50/90 px-4 py-3 text-slate-900 outline-none transition-all duration-200 placeholder:text-slate-400 focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:bg-slate-900";
-
-  return (
-    <div className="flex min-h-screen flex-col overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(37,99,235,0.16),_transparent_35%),linear-gradient(135deg,_#f8fafc_0%,_#eef4ff_100%)] font-sans lg:flex-row dark:bg-[radial-gradient(circle_at_top_left,_rgba(56,189,248,0.16),_transparent_35%),linear-gradient(135deg,_#020617_0%,_#0f172a_100%)]">
-      <div className="relative hidden items-center justify-center overflow-hidden bg-slate-950 lg:flex lg:w-1/2">
-        <div className="absolute inset-0 opacity-20">
-          <div className="absolute -left-10 top-0 h-96 w-96 animate-pulse rounded-full bg-white blur-3xl"></div>
-          <div className="absolute -right-10 bottom-0 h-96 w-96 animate-pulse rounded-full bg-blue-400 blur-3xl delay-700"></div>
-        </div>
-        <div className="relative z-10 px-12 text-center">
-          <img src="/logo.svg" alt="Swami Sharanam" className="mx-auto mb-8 h-32 w-auto drop-shadow-2xl" />
-          <h1 className="mb-6 text-6xl font-black tracking-tighter text-white">Swami Sharanam</h1>
-          <p className="mx-auto max-w-md text-xl font-medium leading-relaxed text-slate-300">
-            The next generation of sales distribution, collections, and field execution management.
-          </p>
+  if (success) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-indigo-900 via-purple-900 to-slate-900 flex flex-col items-center justify-center p-4">
+        <div className="glass-card max-w-md w-full p-8 text-center animate-fade-in shadow-2xl border border-white/10">
+          <div className="w-16 h-16 bg-green-500/20 text-green-400 rounded-full flex items-center justify-center mx-auto mb-4 border border-green-500/50">
+            <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+          <h2 className="text-2xl font-bold text-white mb-2">Account Created!</h2>
+          <p className="text-gray-300 mb-6">Your account has been successfully created. You can now sign in to your dashboard.</p>
+          <Link href="/login" className="btn-primary inline-flex justify-center w-full">
+            Proceed to Login
+          </Link>
         </div>
       </div>
+    );
+  }
 
-      <div className="relative flex flex-1 items-center justify-center p-6 sm:p-12 lg:p-24">
-        <div className="w-full max-w-md space-y-8">
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-indigo-900 via-purple-900 to-slate-900 flex flex-col items-center justify-center p-4">
+      <div className="glass-card max-w-md w-full p-8 animate-fade-in shadow-2xl border border-white/10 rounded-2xl">
+        <div className="flex flex-col items-center text-center space-y-2 mb-6">
+          <h1 className="text-2xl font-bold text-white tracking-tight">Create Account</h1>
+          <p className="text-sm text-gray-400">Join Swami Sharanam Distribution</p>
+        </div>
+
+        {error && (
+          <div className="mb-6 p-3 bg-red-500/20 border border-red-500/50 rounded-lg text-red-200 text-sm animate-shake">
+            {error}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <h2 className="text-3xl font-bold text-slate-900 dark:text-white">Create account</h2>
-            <p className="mt-2 font-medium text-slate-500 dark:text-slate-400">Join the team and manage your sales operations</p>
+            <label className="text-sm font-medium text-gray-300 mb-1 block" htmlFor="name">Full Name *</label>
+            <input
+              id="name"
+              name="name"
+              type="text"
+              required
+              className="input-field w-full"
+              placeholder="John Doe"
+              value={formData.name}
+              onChange={handleChange}
+            />
           </div>
 
-          <div className="rounded-[28px] border border-slate-200/80 bg-white/85 p-8 shadow-soft backdrop-blur-xl dark:border-slate-800/70 dark:bg-slate-900/70">
-            {error && (
-              <div className="mb-6 flex items-center gap-2 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm font-semibold text-rose-600 dark:border-rose-800 dark:bg-rose-900/20 dark:text-rose-400">
-                <span>⚠️</span> {error}
-              </div>
+          <div>
+            <label className="text-sm font-medium text-gray-300 mb-1 block" htmlFor="email">Email Address *</label>
+            <input
+              id="email"
+              name="email"
+              type="email"
+              required
+              className="input-field w-full"
+              placeholder="name@example.com"
+              value={formData.email}
+              onChange={handleChange}
+            />
+          </div>
+
+          <div>
+            <label className="text-sm font-medium text-gray-300 mb-1 block" htmlFor="password">Password *</label>
+            <input
+              id="password"
+              name="password"
+              type="password"
+              required
+              className="input-field w-full"
+              placeholder="••••••••"
+              value={formData.password}
+              onChange={handleChange}
+            />
+          </div>
+
+          <div>
+            <label className="text-sm font-medium text-gray-300 mb-1 block" htmlFor="phone">Phone Number</label>
+            <input
+              id="phone"
+              name="phone"
+              type="tel"
+              className="input-field w-full"
+              placeholder="+91 98765 43210"
+              value={formData.phone}
+              onChange={handleChange}
+            />
+          </div>
+
+          <div>
+            <label className="text-sm font-medium text-gray-300 mb-1 block" htmlFor="role">Role</label>
+            <select
+              id="role"
+              name="role"
+              className="input-field w-full bg-slate-800/50"
+              value={formData.role}
+              onChange={handleChange}
+            >
+              <option value="salesperson">Salesperson</option>
+              <option value="manager">Manager</option>
+              <option value="admin">Administrator</option>
+            </select>
+          </div>
+
+          <button
+            type="submit"
+            disabled={isLoading}
+            className="btn-primary w-full flex justify-center py-2.5 text-sm font-semibold mt-6"
+          >
+            {isLoading ? (
+              <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+            ) : (
+              'Create Account'
             )}
+          </button>
+        </form>
 
-            <form onSubmit={handleSubmit} className="space-y-5">
-              <div className="space-y-2">
-                <label className="ml-1 text-sm font-bold text-slate-700 dark:text-slate-300">Full Name *</label>
-                <input type="text" value={name} onChange={(e) => setName(e.target.value)} required disabled={loading} className={inputClass} placeholder="John Doe" />
-              </div>
-
-              <div className="space-y-2">
-                <label className="ml-1 text-sm font-bold text-slate-700 dark:text-slate-300">Email Address *</label>
-                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required disabled={loading} className={inputClass} placeholder="name@company.com" />
-              </div>
-
-              <div className="space-y-2">
-                <label className="ml-1 text-sm font-bold text-slate-700 dark:text-slate-300">Phone Number</label>
-                <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} disabled={loading} className={inputClass} placeholder="+91 90000 00000" />
-              </div>
-
-              <div className="space-y-2">
-                <label className="ml-1 text-sm font-bold text-slate-700 dark:text-slate-300">Account Type *</label>
-                <select value={role} onChange={(e) => setRole(e.target.value as 'admin' | 'salesperson')} required disabled={loading} className={inputClass}>
-                  <option value="salesperson">Salesperson</option>
-                  <option value="admin">Admin</option>
-                </select>
-              </div>
-
-              <div className="space-y-2">
-                <label className="ml-1 text-sm font-bold text-slate-700 dark:text-slate-300">Password *</label>
-                <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required disabled={loading} className={inputClass} placeholder="••••••••" />
-              </div>
-
-              <div className="space-y-2">
-                <label className="ml-1 text-sm font-bold text-slate-700 dark:text-slate-300">Confirm Password *</label>
-                <input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} required disabled={loading} className={inputClass} placeholder="••••••••" />
-              </div>
-
-              <button type="submit" disabled={loading} className="btn-primary mt-4 w-full py-4 text-lg">
-                {loading ? <div className="h-6 w-6 animate-spin rounded-full border-2 border-white/30 border-t-white" /> : 'Create Account'}
-              </button>
-            </form>
-
-            <div className="mt-6 text-center">
-              <p className="text-sm text-slate-600 dark:text-slate-400">
-                Already have an account?{' '}
-                <Link href="/login" className="font-bold text-blue-600 hover:text-blue-700">
-                  Sign in
-                </Link>
-              </p>
-              <p className="mt-3 text-[10px] font-medium text-slate-400 dark:text-slate-500">
-                Built for <span className="font-bold text-blue-500">operational clarity</span>
-              </p>
-            </div>
-          </div>
+        <div className="mt-6 text-center text-sm text-gray-400">
+          Already have an account?{' '}
+          <Link href="/login" className="text-indigo-400 hover:text-indigo-300 font-medium transition-colors">
+            Back to login
+          </Link>
         </div>
       </div>
     </div>

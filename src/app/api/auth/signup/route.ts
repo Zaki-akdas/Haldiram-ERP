@@ -1,46 +1,47 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseAdmin } from '@/db';
+import { getCurrentUser } from '@/lib/auth';
+import { db } from '@/db';
+import { users } from '@/db/schema';
+import { createAdminClient } from '@/lib/supabase';
 
-export const dynamic = 'force-dynamic';
-
-export async function POST(request: NextRequest) {
+export async function POST(req: NextRequest) {
   try {
-    const supabase = getSupabaseAdmin();
-    const body = await request.json();
+    const currentUser = await getCurrentUser();
+    
+    if (!currentUser || currentUser.role !== 'admin') {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
+    const body = await req.json();
     const { email, password, name, role, phone } = body;
 
-    if (!email || !password || !name || !role) {
-      return NextResponse.json({ error: 'Email, password, name, and role are required' }, { status: 400 });
+    if (!email || !password || !name) {
+      return NextResponse.json({ error: 'Email, password, and name are required' }, { status: 400 });
     }
 
-    const validRoles = ['admin', 'salesperson'];
-    if (!validRoles.includes(role)) {
-      return NextResponse.json({ error: 'Invalid role selected' }, { status: 400 });
-    }
+    const userRole = role || 'salesperson';
 
-    const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+    const supabase = createAdminClient();
+    const { data, error } = await supabase.auth.admin.createUser({
       email,
       password,
       email_confirm: true,
-      user_metadata: { name, role, phone },
     });
 
-    if (authError || !authData.user) {
-      return NextResponse.json({ error: authError?.message || 'Failed to create account' }, { status: 500 });
+    if (error || !data.user) {
+      return NextResponse.json({ error: error?.message || 'Failed to create user in Supabase' }, { status: 400 });
     }
 
-    return NextResponse.json({
-      message: 'Account created successfully',
-      user: {
-        id: parseInt(authData.user.id),
-        email: authData.user.email!,
-        name,
-        role,
-        phone: phone || null,
-      },
-    }, { status: 201 });
+    const insertedUsers = await db.insert(users).values({
+      email,
+      password: 'supabase_managed',
+      name,
+      role: userRole,
+      phone: phone || null,
+    }).returning();
+
+    return NextResponse.json(insertedUsers[0]);
   } catch (error) {
-    console.error('Signup error:', error);
-    return NextResponse.json({ error: 'Failed to create account' }, { status: 500 });
+    return NextResponse.json({ error: (error as Error).message || 'Internal server error' }, { status: 500 });
   }
 }

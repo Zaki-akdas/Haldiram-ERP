@@ -1,147 +1,197 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseAdmin } from '@/db';
 import { getCurrentUser } from '@/lib/auth';
+import { db } from '@/db';
+import { settlements, orders, customers, users, activityLogs } from '@/db/schema';
+import { eq, desc, and, count, gte, lte, like, or } from 'drizzle-orm';
 
-export const dynamic = 'force-dynamic';
-
-export async function GET(request: NextRequest) {
+export async function GET(req: NextRequest) {
   try {
-    const supabase = getSupabaseAdmin();
     const user = await getCurrentUser();
-    if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const { searchParams } = new URL(request.url);
-    const page = parseInt(searchParams.get('page') || '1', 10);
-    const limit = parseInt(searchParams.get('limit') || '20', 10);
+    const searchParams = req.nextUrl.searchParams;
+    const page = parseInt(searchParams.get('page') || '1');
+    const limit = parseInt(searchParams.get('limit') || '20');
+    const orderId = searchParams.get('orderId');
+    const customerId = searchParams.get('customerId');
+    const startDate = searchParams.get('startDate');
+    const endDate = searchParams.get('endDate');
+    const mode = searchParams.get('mode');
+    const search = searchParams.get('search');
+
     const offset = (page - 1) * limit;
-    const isAdmin = user.role === 'admin';
+    const conditions = [];
 
-    let query = supabase
-      .from('settlements')
-      .select('*', { count: 'exact' })
-      .order('settled_at', { ascending: false });
+    if (user.role === 'salesperson') {
+      conditions.push(eq(settlements.salespersonId, user.id));
+    }
 
-    if (!isAdmin) query = query.eq('salesperson_id', user.id);
+    if (orderId) conditions.push(eq(settlements.orderId, Number(orderId)));
+    if (customerId) conditions.push(eq(settlements.customerId, Number(customerId)));
+    if (mode && mode !== 'All') conditions.push(eq(settlements.paymentMode, mode));
+    
+    if (startDate) conditions.push(gte(settlements.settledAt, new Date(startDate)));
+    if (endDate) conditions.push(lte(settlements.settledAt, new Date(endDate)));
 
-    const { data: settlementList, count, error } = await query.range(offset, offset + limit - 1);
-    if (error) throw error;
+    if (search) {
+      conditions.push(
+        or(
+          like(settlements.referenceNumber, `%${search}%`),
+          like(settlements.notes, `%${search}%`)
+        )
+      );
+    }
 
-    const orderIds = [...new Set((settlementList || []).map((s: any) => s.order_id).filter(Boolean))];
-    const customerIds = [...new Set((settlementList || []).map((s: any) => s.customer_id).filter(Boolean))];
-    const salespersonIds = [...new Set((settlementList || []).map((s: any) => s.salesperson_id).filter(Boolean))];
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
-    const { data: ordersData } = await supabase.from('orders').select('id, invoice_number').in('id', orderIds);
-    const { data: customersData } = await supabase.from('customers').select('id, name').in('id', customerIds);
-    const { data: usersData } = await supabase.from('users').select('id, name').in('id', salespersonIds);
+    const [{ total }] = await db
+      .select({ total: count() })
+      .from(settlements)
+      .where(whereClause);
 
-    const orderMap: Map<number, any> = new Map((ordersData || []).map((o: any) => [o.id, o]));
-    const customerMap: Map<number, any> = new Map((customersData || []).map((c: any) => [c.id, c]));
-    const userMap: Map<number, any> = new Map((usersData || []).map((u: any) => [u.id, u]));
+    const rawSettlements = await db
+      .select()
+      .from(settlements)
+      .where(whereClause)
+      .limit(limit)
+      .offset(offset)
+      .orderBy(desc(settlements.settledAt));
 
-    const formatted = (settlementList || []).map((s: any) => ({
-      id: s.id,
-      orderId: s.order_id,
-      invoiceNumber: orderMap.get(s.order_id)?.invoice_number,
-      customerId: s.customer_id,
-      customerName: customerMap.get(s.customer_id)?.name,
-      salespersonId: s.salesperson_id,
-      salespersonName: userMap.get(s.salesperson_id)?.name,
-      amount: Number(s.amount || 0),
-      paymentMode: s.payment_mode,
-      referenceNumber: s.reference_number,
-      notes: s.notes,
-      settledAt: s.settled_at,
-    }));
+    const settlementsWithDetails = await Promise.all(
+      rawSettlements.map(async (s) => {
+        const [order] = await db.select().from(orders).where(eq(orders.id, s.orderId));
+        const [customer] = order ? await db.select().from(customers).where(eq(customers.id, order.customerId)) : [];
+        const [salesperson] = order ? await db.select().from(users).where(eq(users.id, order.salespersonId)) : [];
+
+        return {
+          ...s,
+          date: s.settledAt ? new Date(s.settledAt).toISOString().split('T')[0] : '',
+          invoiceNumber: order?.invoiceNumber || '',
+          customerName: customer?.name || '',
+          salespersonName: salesperson?.name || '',
+          mode: s.paymentMode || '',
+        };
+      })
+    );
 
     return NextResponse.json({
-      settlements: formatted,
-      pagination: { page, limit, total: count || 0, totalPages: Math.ceil((count || 0) / limit) },
+      settlements: settlementsWithDetails,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit)
     });
   } catch (error) {
-    console.error('Settlements fetch error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: (error as Error).message }, { status: 500 });
   }
 }
 
-export async function POST(request: NextRequest) {
+export async function POST(req: NextRequest) {
   try {
-    const supabase = getSupabaseAdmin();
     const user = await getCurrentUser();
-    if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const body = await request.json();
-    const { orderId, amount, paymentMode, cashAmount, onlineAmount, denominations, clearingDays, referenceNumber, notes } = body;
+    const body = await req.json();
+    const { orderId, customerId, salespersonId, amount, cashAmount, onlineAmount, paymentMode, denominations, clearingDays, referenceNumber, notes } = body;
 
-    if (!orderId || amount === undefined || !paymentMode) {
-      return NextResponse.json(
-        { error: 'Order ID, amount, and payment mode are required' },
-        { status: 400 }
-      );
+    const [newSettlement] = await db.insert(settlements).values({
+      orderId,
+      customerId,
+      salespersonId: salespersonId || user.id,
+      amount: amount.toString(),
+      cashAmount: cashAmount?.toString() || '0',
+      onlineAmount: onlineAmount?.toString() || '0',
+      paymentMode,
+      denominations,
+      clearingDays,
+      referenceNumber,
+      notes,
+    }).returning();
+
+    const [order] = await db.select().from(orders).where(eq(orders.id, orderId));
+    
+    if (order) {
+      const newAmountPaid = Number(order.amountPaid) + Number(amount);
+      const balance = Number(order.grandTotal) - newAmountPaid;
+      
+      let settlementStatus = 'pending';
+      if (balance <= 0) {
+        settlementStatus = 'settled';
+      } else if (newAmountPaid > 0) {
+        settlementStatus = 'partial';
+      }
+
+      await db.update(orders)
+        .set({
+          amountPaid: newAmountPaid.toString(),
+          balance: Math.max(0, balance).toString(),
+          settlementStatus: settlementStatus as any,
+          updatedAt: new Date()
+        })
+        .where(eq(orders.id, orderId));
     }
 
-    const { data: orderData, error } = await supabase
-      .from('orders')
-      .select('id, customer_id, amount_paid, grand_total, invoice_number, balance')
-      .eq('id', orderId)
-      .single();
-
-    if (error || !orderData) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
-
-    const { data: customerData } = await supabase.from('customers').select('name').eq('id', orderData.customer_id).single();
-
-    const currentBalance = Number(orderData.balance || 0);
-    if (amount > currentBalance + 0.5) {
-      return NextResponse.json(
-        { error: `Amount exceeds balance (₹${currentBalance.toFixed(2)})` },
-        { status: 400 }
-      );
-    }
-
-    const { data: newSettlement, error: insertError } = await supabase
-      .from('settlements')
-      .insert({
-        order_id: orderId,
-        customer_id: orderData.customer_id,
-        salesperson_id: user.id,
-        amount: amount.toString(),
-        cash_amount: (cashAmount || 0).toString(),
-        online_amount: (onlineAmount || 0).toString(),
-        payment_mode: paymentMode,
-        denominations: denominations || null,
-        clearing_days: clearingDays ? parseInt(clearingDays) : 0,
-        reference_number: referenceNumber || null,
-        notes: notes || null,
-      })
-      .select()
-      .single();
-
-    if (insertError) throw insertError;
-
-    const newAmountPaid = Number(orderData.amount_paid || 0) + amount;
-    const newBalance = Math.max(0, Number(orderData.grand_total || 0) - newAmountPaid);
-    const newStatus = newBalance <= 0 ? 'settled' : (newAmountPaid > 0 ? 'partial' : 'pending');
-
-    await supabase
-      .from('orders')
-      .update({
-        amount_paid: newAmountPaid.toFixed(2),
-        balance: newBalance.toFixed(2),
-        settlement_status: newStatus,
-      })
-      .eq('id', orderId);
-
-    await supabase.from('activity_logs').insert({
-      user_id: user.id,
-      activity_type: 'settlement',
-      entity_type: 'settlement',
-      entity_id: newSettlement.id,
-      description: `Bill Punched: Collected ₹${amount} from ${customerData?.name || 'customer'} for ${orderData.invoice_number} (${paymentMode})`,
-      metadata: { orderId, amount, paymentMode, shop: customerData?.name, invoice: orderData.invoice_number, denominations },
+    await db.insert(activityLogs).values({
+      userId: user.id,
+      activityType: 'settlement',
+      entityType: 'settlement',
+      entityId: newSettlement.id,
+      description: `Settlement of ₹${amount} recorded for Order #${orderId}`
     });
 
-    return NextResponse.json({ settlement: newSettlement }, { status: 201 });
+    return NextResponse.json(newSettlement, { status: 201 });
   } catch (error) {
-    console.error('Settlement create error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: (error as Error).message }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const user = await getCurrentUser();
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+    const body = await req.json();
+    const ids: number[] = Array.isArray(body?.ids) ? body.ids.map(Number) : (body?.id ? [Number(body.id)] : []);
+
+    if (ids.length === 0) {
+      return NextResponse.json({ error: 'No settlement IDs provided' }, { status: 400 });
+    }
+
+    const deletedSettlements = [];
+    for (const id of ids) {
+      const [deleted] = await db.delete(settlements).where(eq(settlements.id, id)).returning();
+      if (deleted) {
+        deletedSettlements.push(deleted);
+      }
+    }
+
+    const orderIds = [...new Set(deletedSettlements.map((s: any) => s.orderId))];
+    for (const orderId of orderIds) {
+      const allSettlements = await db.select().from(settlements).where(eq(settlements.orderId, orderId));
+      const totalPaid = allSettlements.reduce((sum: number, s: any) => sum + Number(s.amount || 0), 0);
+
+      const [order] = await db.select().from(orders).where(eq(orders.id, orderId));
+      if (order) {
+        let settlementStatus = 'pending';
+        if (totalPaid >= Number(order.grandTotal)) {
+          settlementStatus = 'settled';
+        } else if (totalPaid > 0) {
+          settlementStatus = 'partial';
+        }
+
+        await db.update(orders)
+          .set({
+            amountPaid: totalPaid.toString(),
+            balance: Math.max(0, Number(order.grandTotal) - totalPaid).toString(),
+            settlementStatus: settlementStatus as any,
+            updatedAt: new Date()
+          })
+          .where(eq(orders.id, orderId));
+      }
+    }
+
+    return NextResponse.json({ success: true, count: ids.length });
+  } catch (error) {
+    return NextResponse.json({ error: (error as Error).message }, { status: 500 });
   }
 }

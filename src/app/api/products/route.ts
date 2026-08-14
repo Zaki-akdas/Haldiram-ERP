@@ -1,97 +1,122 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseAdmin } from '@/db';
-import { getCurrentUser } from '@/lib/auth';
+import { getCurrentUser, isManager } from '@/lib/auth';
+import { db } from '@/db';
+import { products, activityLogs } from '@/db/schema';
+import { eq, like, or, and, count } from 'drizzle-orm';
 
-export const dynamic = 'force-dynamic';
-
-export async function GET(request: NextRequest) {
+export async function GET(req: NextRequest) {
   try {
     const user = await getCurrentUser();
-    if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const { searchParams } = new URL(request.url);
-    const search = searchParams.get('search') || '';
-    const category = searchParams.get('category') || '';
-    const page = parseInt(searchParams.get('page') || '1', 10);
-    const limit = parseInt(searchParams.get('limit') || '20', 10);
+    const searchParams = req.nextUrl.searchParams;
+    const page = parseInt(searchParams.get('page') || '1');
+    const limit = parseInt(searchParams.get('limit') || '20');
+    const search = searchParams.get('search');
+    const category = searchParams.get('category');
+
     const offset = (page - 1) * limit;
+    const conditions = [];
 
-    const supabase = getSupabaseAdmin();
-    let query = supabase.from('products').select('*', { count: 'exact' });
-    if (search) query = query.ilike('name', `%${search}%`);
-    if (category) query = query.eq('category', category);
+    if (search) {
+      conditions.push(
+        or(
+          like(products.name, `%${search}%`),
+          like(products.erpId, `%${search}%`),
+          like(products.hsnCode, `%${search}%`)
+        )
+      );
+    }
+    
+    if (category) {
+      conditions.push(eq(products.category, category));
+    }
 
-    const { data: productList, count, error } = await query
-      .order('created_at', { ascending: false })
-      .range(offset, offset + limit - 1);
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
-    if (error) throw error;
+    const [{ total }] = await db
+      .select({ total: count() })
+      .from(products)
+      .where(whereClause);
 
-    const { data: categoriesData } = await supabase.from('products').select('category');
-    const categories = [...new Set(categoriesData?.map((c: any) => c.category).filter(Boolean) || [])];
+    const data = await db
+      .select()
+      .from(products)
+      .where(whereClause)
+      .limit(limit)
+      .offset(offset)
+      .orderBy(products.name);
 
     return NextResponse.json({
-      products: (productList || []).map((p: any) => ({
-        ...p,
-        mrp: Number(p.mrp),
-        basePrice: Number(p.base_price),
-        gstRate: Number(p.gst_rate),
-      })),
-      categories,
-      pagination: { page, limit, total: count || 0, totalPages: Math.ceil((count || 0) / limit) },
+      products: data,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit)
     });
   } catch (error) {
-    console.error('Products fetch error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: (error as Error).message }, { status: 500 });
   }
 }
 
-export async function POST(request: NextRequest) {
+export async function POST(req: NextRequest) {
   try {
     const user = await getCurrentUser();
-    if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    if (!isManager(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
-    if (user.role !== 'admin' && user.role !== 'manager') {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+    const body = await req.json();
+    const { erpId, name, description, category, unit, mrp, basePrice, gstRate, hsnCode, stockQty } = body;
+
+    if (!name || basePrice === undefined) {
+      return NextResponse.json({ error: 'Name and basePrice are required' }, { status: 400 });
     }
 
-    const body = await request.json();
-    const { erpId, name, category, unit, mrp, basePrice, gstRate, hsnCode, stockQty } = body;
+    const [newProduct] = await db.insert(products).values({
+      erpId,
+      name,
+      description,
+      category,
+      unit,
+      mrp: mrp?.toString(),
+      basePrice: basePrice.toString(),
+      gstRate: gstRate?.toString() || '0',
+      hsnCode,
+      stockQty
+    }).returning();
 
-    if (!name || !mrp || !basePrice) {
-      return NextResponse.json({ error: 'Name, MRP, and base price are required' }, { status: 400 });
-    }
-
-    const supabase = getSupabaseAdmin();
-    const { data: newProduct, error } = await supabase
-      .from('products')
-      .insert({
-        erp_id: erpId,
-        name,
-        category,
-        unit: unit || 'PCS',
-        mrp: mrp.toString(),
-        base_price: basePrice.toString(),
-        gst_rate: (gstRate || 18).toString(),
-        hsn_code: hsnCode,
-        stock_qty: stockQty || 0,
-      })
-      .select()
-      .single();
-
-    if (error) throw error;
-
-    await supabase.from('activity_logs').insert({
-      user_id: user.id,
-      activity_type: 'product_added',
-      entity_type: 'product',
-      entity_id: newProduct.id,
-      description: `Added product ${name}`,
+    await db.insert(activityLogs).values({
+      userId: user.id,
+      activityType: 'product_added',
+      entityType: 'product',
+      entityId: newProduct.id,
+      description: `Product ${name} added`
     });
 
-    return NextResponse.json({ product: newProduct }, { status: 201 });
+    return NextResponse.json(newProduct, { status: 201 });
   } catch (error) {
-    console.error('Product create error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: (error as Error).message }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const user = await getCurrentUser();
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+    const body = await req.json();
+    const ids: number[] = Array.isArray(body?.ids) ? body.ids.map(Number) : (body?.id ? [Number(body.id)] : []);
+
+    if (ids.length === 0) {
+      return NextResponse.json({ error: 'No product IDs provided' }, { status: 400 });
+    }
+
+    for (const id of ids) {
+      await db.delete(products).where(eq(products.id, id));
+    }
+
+    return NextResponse.json({ success: true, count: ids.length });
+  } catch (error) {
+    return NextResponse.json({ error: (error as Error).message }, { status: 500 });
   }
 }

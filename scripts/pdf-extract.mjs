@@ -1,18 +1,18 @@
-import { PDFParse } from 'pdf-parse';
-import fs from 'fs';
+#!/usr/bin/env node
+import { readFileSync } from 'fs';
+import pdf from 'pdf-parse/lib/pdf-parse.js';
 
-const inputPath = process.argv[2];
-if (!inputPath) {
-  console.error('Usage: node pdf-extract.mjs <pdf-file-path>');
+const filePath = process.argv[2];
+if (!filePath) {
+  console.error('Usage: node scripts/pdf-extract.mjs <pdf-path>');
   process.exit(1);
 }
 
 try {
-  const buf = fs.readFileSync(inputPath);
-  const parser = new PDFParse(new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength));
-  const result = await parser.getText();
-  console.log(result.text || '');
-} catch (err) {
-  console.error('PDF_EXTRACT_ERROR:', err instanceof Error ? err.message : String(err));
+  const buffer = readFileSync(filePath);
+  const data = await pdf(buffer);
+  console.log(data.text);
+} catch (error) {
+  console.error(`PDF_EXTRACT_ERROR: ${error.message}`);
   process.exit(1);
 }

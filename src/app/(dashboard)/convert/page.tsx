@@ -1,326 +1,299 @@
 'use client';
 
-import { useState, useRef, useCallback } from 'react';
+import { useState } from 'react';
 import { useAuth } from '@/components/AuthProvider';
-
-type InputType = 'pdf' | 'excel' | 'csv';
-type OutputType = 'csv' | 'copy-paste';
-type Mode = 'fast' | 'ai';
-type AIProvider = 'ollama' | 'gemini' | 'azure' | 'bazaarlink';
 
 export default function ConvertPage() {
   const { authFetch } = useAuth();
+  
   const [file, setFile] = useState<File | null>(null);
-  const [inputType, setInputType] = useState<InputType>('pdf');
-  const [outputType, setOutputType] = useState<OutputType>('csv');
-  const [mode, setMode] = useState<Mode>('fast');
-  const [provider, setProvider] = useState<AIProvider>('bazaarlink');
-  const [converting, setConverting] = useState(false);
-  const [preview, setPreview] = useState<string | null>(null);
+  const [sourceFormat, setSourceFormat] = useState('');
+  const [targetFormat, setTargetFormat] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<any>(null);
   const [error, setError] = useState('');
-  const [progress, setProgress] = useState(0);
-  const [warning, setWarning] = useState('');
-  const [downloadName, setDownloadName] = useState('');
-  const fileRef = useRef<HTMLInputElement>(null);
-
-  const reset = () => {
-    setFile(null); setPreview(null); setError(''); setWarning(''); setProgress(0); setDownloadName('');
-    if (fileRef.current) fileRef.current.value = '';
+  const [activeTab, setActiveTab] = useState('Preview');
+  
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.currentTarget.classList.add('border-primary');
   };
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    if (f) {
-      const ext = f.name.split('.').pop()?.toLowerCase() || '';
-      if (!['pdf', 'xlsx', 'xls', 'csv'].includes(ext)) {
-        setError('Unsupported file type. Please upload PDF, Excel, or CSV.');
-        return;
-      }
-      setFile(f);
-      setInputType(ext as InputType);
-      setError('');
-      setWarning('');
-      setPreview(null);
+  
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.currentTarget.classList.remove('border-primary');
+  };
+  
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.currentTarget.classList.remove('border-primary');
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      processFile(e.dataTransfer.files[0]);
     }
   };
-
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    const f = e.dataTransfer.files[0];
-    if (f) handleFileChange({ target: { files: [f] } } as any);
-  }, []);
-
-  const handleConvert = async () => {
-    if (!file) return;
-
-    setConverting(true);
-    setProgress(0);
+  
+  const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      processFile(e.target.files[0]);
+    }
+  };
+  
+  const processFile = (selectedFile: File) => {
+    setFile(selectedFile);
     setError('');
-    setWarning('');
-    setPreview(null);
-
-    const tick = setInterval(() => setProgress(p => Math.min(p + 8, 85)), 120);
-
+    setResult(null);
+    setTargetFormat('');
+    
+    const ext = selectedFile.name.split('.').pop()?.toLowerCase();
+    if (ext === 'pdf') {
+      setSourceFormat('PDF');
+      setTargetFormat('CSV');
+    } else if (ext === 'xlsx' || ext === 'xls') {
+      setSourceFormat('Excel');
+      setTargetFormat('CSV');
+    } else if (ext === 'csv') {
+      setSourceFormat('CSV');
+      setTargetFormat('JSON');
+    } else {
+      setError('Unsupported file format. Please upload PDF, Excel, or CSV.');
+      setFile(null);
+      setSourceFormat('');
+    }
+  };
+  
+  const getAvailableTargets = () => {
+    if (sourceFormat === 'PDF') return ['CSV', 'JSON', 'Text'];
+    if (sourceFormat === 'Excel') return ['CSV', 'JSON'];
+    if (sourceFormat === 'CSV') return ['JSON'];
+    return [];
+  };
+  
+  const handleConvert = async () => {
+    if (!file || !targetFormat) return;
+    
+    setLoading(true);
+    setError('');
+    
     try {
-      const fd = new FormData();
-      fd.append('file', file);
-      fd.append('targetFormat', outputType);
-
-      if (mode === 'ai') {
-        fd.append('mode', 'ai');
-        fd.append('provider', provider);
-      }
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('targetFormat', targetFormat.toLowerCase());
 
       const res = await authFetch('/api/convert', {
         method: 'POST',
-        body: fd,
+        body: formData,
       });
 
-      clearInterval(tick);
-      setProgress(100);
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: 'Conversion failed' }));
-        throw new Error(err.error || `Conversion failed (${res.status})`);
-      }
-
       const data = await res.json();
-      const convertedText = data.text || '';
-      setPreview(convertedText);
-      setDownloadName(data.filename || '');
-
-      if (mode === 'ai') {
-        const providerLabel = provider === 'ollama' ? 'Local Ollama' : provider === 'gemini' ? 'Google Gemini' : provider === 'azure' ? 'Azure OpenAI' : 'BazaarLink';
-        setWarning(data.warning || `AI mode used ${providerLabel}. If results are poor, try Fast mode or switch provider.`);
+      if (!res.ok) {
+        throw new Error(data.error || 'Conversion failed');
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Conversion failed');
+
+      let contentStr = '';
+      if (typeof data.result === 'object') {
+        contentStr = JSON.stringify(data.result, null, 2);
+      } else {
+        contentStr = String(data.result);
+      }
+
+      setResult({
+        content: contentStr,
+        format: data.format || targetFormat
+      });
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || 'Conversion failed. Please try again.');
     } finally {
-      clearInterval(tick);
-      setConverting(false);
-      setProgress(100);
+      setLoading(false);
     }
   };
-
-  const handleDownload = () => {
-    if (!preview) return;
-    const blob = new Blob([preview], { type: outputType === 'csv' ? 'text/csv;charset=utf-8' : 'text/plain;charset=utf-8' });
+  
+  const downloadResult = () => {
+    if (!result) return;
+    
+    const blob = new Blob([result.content], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    const ext = outputType === 'csv' ? 'csv' : 'txt';
-    const name = downloadName || (file ? `${file.name.replace(/\.[^/.]+$/, '')}_converted.${ext}` : `converted.${ext}`);
-    a.download = name;
+    a.download = `converted_${file?.name || 'file'}.${result.format.toLowerCase()}`;
     document.body.appendChild(a);
     a.click();
-    a.remove();
+    document.body.removeChild(a);
     URL.revokeObjectURL(url);
   };
+  
+  const copyToClipboard = () => {
+    if (!result) return;
+    navigator.clipboard.writeText(result.content);
+    alert('Copied to clipboard!');
+  };
 
-  const handleCopy = async () => {
-    if (!preview) return;
-    try {
-      await navigator.clipboard.writeText(preview);
-      alert('Copied to clipboard!');
-    } catch {
-      setError('Failed to copy to clipboard');
+  const renderPreview = () => {
+    if (!result) return null;
+    
+    if (result.format === 'JSON') {
+      return (
+        <pre className="bg-gray-900 text-green-400 p-4 rounded-lg overflow-x-auto text-sm font-mono shadow-inner max-h-96">
+          {result.content}
+        </pre>
+      );
     }
+    
+    if (result.format === 'CSV' && activeTab === 'Preview') {
+      const rows = result.content.split('\n').filter((r: string) => r.trim());
+      if (rows.length === 0) return <p className="text-gray-400">Empty output</p>;
+      
+      const headers = rows[0].split(',');
+      const data = rows.slice(1).map((r: string) => r.split(','));
+      
+      return (
+        <div className="overflow-x-auto max-h-96 border border-gray-700 rounded-lg">
+          <table className="w-full text-left border-collapse text-sm">
+            <thead className="bg-slate-900 sticky top-0 text-gray-300">
+              <tr>
+                {headers.map((h: string, i: number) => (
+                  <th key={i} className="p-3 font-semibold border-b border-gray-700">{h.replace(/^"|"$/g, '')}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-800 text-gray-200">
+              {data.map((row: string[], i: number) => (
+                <tr key={i} className="hover:bg-slate-800/50">
+                  {row.map((cell: string, j: number) => (
+                    <td key={j} className="p-3">{cell.replace(/^"|"$/g, '')}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+    }
+    
+    return (
+      <pre className="bg-slate-900 text-gray-200 p-4 rounded-lg overflow-x-auto text-sm max-h-96 whitespace-pre-wrap border border-gray-700">
+        {result.content}
+      </pre>
+    );
   };
 
   return (
-    <div className="space-y-6 max-w-5xl mx-auto">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-800 dark:text-white">🔄 File Converter</h1>
-        <p className="text-slate-500 dark:text-slate-400">Convert PDF, Excel, or CSV to structured CSV or Copy-Paste format</p>
-      </div>
-
-      <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
-        <div className="p-5 space-y-5">
-          {/* File Upload */}
-          <div
-            onDrop={handleDrop}
-            onDragOver={e => e.preventDefault()}
-            onClick={() => fileRef.current?.click()}
-            className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all ${
-              file ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/10' : 'border-slate-300 dark:border-slate-600 hover:border-emerald-400'
-            }`}
-          >
-            <input
-              ref={fileRef}
-              type="file"
-              accept=".pdf,.xlsx,.xls,.csv"
-              onChange={handleFileChange}
-              className="hidden"
-            />
-            {file ? (
-              <div>
-                <span className="text-5xl mb-3 block">
-                  {file.name.match(/\.(xlsx|xls|csv)$/i) ? '📊' : '📄'}
-                </span>
-                <p className="font-bold text-lg text-slate-800 dark:text-white">{file.name}</p>
-                <p className="text-sm text-slate-500 mt-1">{(file.size / 1024).toFixed(1)} KB</p>
-                <button onClick={e => { e.stopPropagation(); reset(); }} className="mt-3 text-xs text-red-500 hover:underline font-bold">
-                  Remove file
-                </button>
-              </div>
-            ) : (
-              <div>
-                <div className="flex justify-center gap-4 text-5xl mb-3">
-                  <span>📄</span><span>📊</span>
-                </div>
-                <p className="text-slate-700 dark:text-slate-300 font-bold">Drag & drop your file here</p>
-                <p className="text-slate-400 text-sm mt-1">Supports PDF, Excel (.xlsx/.xls), CSV</p>
-              </div>
-            )}
-          </div>
-
-          {/* Mode, Provider & Output Selection */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Mode</label>
-              <div className="flex border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden">
-                <button
-                  onClick={() => setMode('fast')}
-                  className={`flex-1 py-2 text-sm font-bold transition-colors ${
-                    mode === 'fast' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-50'
-                  }`}
-                >
-                  ⚡ Fast
-                </button>
-                <button
-                  onClick={() => setMode('ai')}
-                  className={`flex-1 py-2 text-sm font-bold transition-colors ${
-                    mode === 'ai' ? 'bg-purple-600 text-white' : 'text-slate-600 hover:bg-slate-50'
-                  }`}
-                >
-                  🤖 AI
-                </button>
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase mb-2">AI Provider</label>
-              <select
-                value={provider}
-                onChange={e => setProvider(e.target.value as AIProvider)}
-                disabled={mode !== 'ai'}
-                className="w-full px-3 py-2 text-sm border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-slate-800 dark:text-white disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <option value="ollama">🖥️ Local Ollama</option>
-                <option value="gemini">☁️ Google Gemini</option>
-                <option value="azure">🌐 Azure OpenAI</option>
-                <option value="bazaarlink">🔌 BazaarLink</option>
-              </select>
-              {mode === 'ai' && (
-                <p className="text-[10px] text-slate-400 mt-1">
-                  {provider === 'ollama' ? 'Requires local Ollama server' : provider === 'gemini' ? 'Requires GEMINI_API_KEY' : provider === 'azure' ? 'Requires Azure OpenAI config' : 'Requires AI_BASE_URL and AI_API_KEY'}
-                </p>
-              )}
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Output Format</label>
-              <div className="flex border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden">
-                <button
-                  onClick={() => setOutputType('csv')}
-                  className={`flex-1 py-2 text-sm font-bold transition-colors ${
-                    outputType === 'csv' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-50'
-                  }`}
-                >
-                  📋 CSV
-                </button>
-                <button
-                  onClick={() => setOutputType('copy-paste')}
-                  className={`flex-1 py-2 text-sm font-bold transition-colors ${
-                    outputType === 'copy-paste' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-50'
-                  }`}
-                >
-                  📝 Copy-Paste
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Convert Button */}
-          <button
-            onClick={handleConvert}
-            disabled={!file || converting}
-            className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold shadow-lg transition-all active:scale-95 disabled:opacity-40 flex items-center justify-center gap-2"
-          >
-            {converting ? (
-              <>
-                <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                Converting...
-              </>
-            ) : (
-              <>
-                {mode === 'ai' ? '🤖' : '⚡'} Convert to {outputType === 'csv' ? 'CSV' : 'Copy-Paste'}
-              </>
-            )}
-          </button>
-
-          {/* Progress */}
-          {converting && (
-            <div className="h-2.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
-              <div className="h-full bg-emerald-500 transition-all duration-300" style={{ width: `${progress}%` }} />
-            </div>
-          )}
-
-          {/* Warning */}
-          {warning && (
-            <div className="p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-400 rounded-lg text-sm font-medium text-center">
-              {warning}
-            </div>
-          )}
-
-          {/* Error */}
-          {error && (
-            <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 rounded-lg text-sm font-medium text-center">
-              {error}
-            </div>
-          )}
-
-          {/* Preview & Actions */}
-          {preview && (
-            <div className="space-y-3 animate-in fade-in slide-in-from-bottom-4 duration-500">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-bold text-slate-700 dark:text-slate-300">Preview</h3>
-                <div className="flex gap-2">
-                  <button
-                    onClick={handleCopy}
-                    className="px-3 py-1.5 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg text-xs font-bold hover:bg-slate-200 transition-colors"
-                  >
-                    📋 Copy
-                  </button>
-                  <button
-                    onClick={handleDownload}
-                    className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-bold hover:bg-emerald-700 transition-colors"
-                  >
-                    ⬇ Download
-                  </button>
-                </div>
-              </div>
-              <div className="bg-slate-50 dark:bg-slate-900 rounded-lg p-4 border border-slate-200 dark:border-slate-700 overflow-x-auto">
-                <pre className="text-xs text-slate-700 dark:text-slate-300 whitespace-pre-wrap font-mono">
-                  {preview}
-                </pre>
-              </div>
-            </div>
-          )}
+    <div className="p-4 md:p-8 max-w-4xl mx-auto">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
+        <div>
+          <h1 className="text-3xl font-bold text-slate-900 dark:text-white">Document File Converter</h1>
+          <p className="text-slate-500 dark:text-slate-400 mt-1">Convert between document formats (PDF, Excel, CSV)</p>
         </div>
+        <button
+          onClick={() => {
+            setFile(null);
+            setResult(null);
+            setError('');
+          }}
+          className="px-4 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-sm rounded-xl border border-slate-200 dark:border-slate-700 flex items-center gap-2 transition-all"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          Refresh Converter
+        </button>
       </div>
 
-      {/* Info Box */}
-      <div className="bg-blue-50 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-900 rounded-xl p-4">
-        <h4 className="text-sm font-bold text-blue-800 dark:text-blue-300 flex items-center gap-2">
-          <span>ℹ️</span> How it works
-        </h4>
-        <ul className="mt-2 space-y-1 text-xs text-blue-700 dark:text-blue-400">
-          <li><strong>Fast mode:</strong> Direct file parsing — instant results for clean PDFs and Excel files.</li>
-          <li><strong>AI mode:</strong> Choose between Local Ollama, Google Gemini, or Azure OpenAI for intelligent extraction, with automatic fallback.</li>
-          <li><strong>Copy-Paste format:</strong> Optimized for directly pasting into WhatsApp, Excel, or email.</li>
-        </ul>
+      <div 
+        className="glass-card border-dashed border-2 border-gray-300 dark:border-gray-700 p-10 text-center hover:border-primary transition-colors cursor-pointer relative mb-6"
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
+        <input 
+          type="file" 
+          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" 
+          onChange={handleFileInput}
+          accept=".pdf,.xlsx,.xls,.csv"
+        />
+        
+        <svg className="w-16 h-16 mx-auto text-primary mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
+        <h3 className="text-xl font-bold mb-2">Drag & drop or click to browse file</h3>
+        <p className="text-gray-500">Supported: PDF, Excel (.xlsx, .xls), CSV</p>
       </div>
+      
+      {error && (
+        <div className="mb-6 p-4 rounded-lg bg-red-900/30 text-red-300 border border-red-800 flex items-start">
+          <svg className="w-5 h-5 mr-2 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+          {error}
+        </div>
+      )}
+
+      {file && (
+        <div className="glass-card p-6 mb-6 animate-in fade-in slide-in-from-bottom-4">
+          <div className="flex flex-col md:flex-row justify-between md:items-center gap-6">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-primary/10 rounded-xl flex items-center justify-center text-primary font-bold">
+                {sourceFormat}
+              </div>
+              <div>
+                <p className="font-medium text-gray-900 dark:text-white truncate max-w-[200px] sm:max-w-xs">{file.name}</p>
+                <p className="text-sm text-gray-500">{(file.size / 1024).toFixed(1)} KB</p>
+              </div>
+            </div>
+            
+            <div className="flex items-center gap-4 flex-wrap">
+              <div className="flex items-center gap-2">
+                <span className="text-gray-400 text-sm font-medium">To:</span>
+                <select 
+                  className="bg-slate-900 border border-gray-700 text-white rounded-lg px-3 py-2 text-sm outline-none min-w-[120px]"
+                  value={targetFormat}
+                  onChange={(e) => setTargetFormat(e.target.value)}
+                >
+                  <option value="" disabled>Select...</option>
+                  {getAvailableTargets().map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+              
+              <button 
+                className="btn-primary py-2 px-6 flex items-center gap-2"
+                onClick={handleConvert}
+                disabled={!targetFormat || loading}
+              >
+                {loading ? 'Converting...' : 'Convert File'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {result && (
+        <div className="glass-card overflow-hidden animate-in fade-in slide-in-from-bottom-4">
+          <div className="border-b border-gray-700 px-6 py-4 flex justify-between items-center bg-slate-900/60">
+            <div className="flex gap-4">
+              <button 
+                className={`font-medium pb-1 ${activeTab === 'Preview' ? 'text-primary border-b-2 border-primary' : 'text-gray-400'}`}
+                onClick={() => setActiveTab('Preview')}
+              >
+                Preview
+              </button>
+              <button 
+                className={`font-medium pb-1 ${activeTab === 'Raw' ? 'text-primary border-b-2 border-primary' : 'text-gray-400'}`}
+                onClick={() => setActiveTab('Raw')}
+              >
+                Raw Text
+              </button>
+            </div>
+            
+            <div className="flex gap-2">
+              <button onClick={copyToClipboard} className="p-2 text-gray-400 hover:text-primary transition-colors" title="Copy to clipboard">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+              </button>
+              <button onClick={downloadResult} className="p-2 text-gray-400 hover:text-primary transition-colors" title="Download">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+              </button>
+            </div>
+          </div>
+          <div className="p-6">
+            {renderPreview()}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

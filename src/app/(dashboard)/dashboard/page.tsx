@@ -1,223 +1,213 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useState, useEffect } from 'react';
+import Link from 'next/link';
+import Image from 'next/image';
 import { useAuth } from '@/components/AuthProvider';
-
-function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('en-IN', {
-    style: 'currency',
-    currency: 'INR',
-    maximumFractionDigits: 0,
-  }).format(amount);
-}
 
 export default function DashboardPage() {
   const { user, authFetch } = useAuth();
-  const [data, setData] = useState<any | null>(null);
+  const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [refreshing, setRefreshing] = useState(false);
-  const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
-
-  async function fetchDashboard() {
-    try {
-      const res = await authFetch('/api/dashboard');
-      if (!res.ok) throw new Error('Failed to fetch dashboard');
-      const json = await res.json();
-      setData(json);
-      setLastRefreshed(new Date());
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error loading dashboard');
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }
-
-  const handleRefresh = useCallback(async () => {
-    setRefreshing(true);
-    setError('');
-    await fetchDashboard();
-  }, [authFetch]);
 
   useEffect(() => {
+    const fetchDashboard = async () => {
+      setLoading(true);
+      try {
+        const res = await authFetch('/api/dashboard');
+        if (res.ok) {
+          const json = await res.json();
+          setData(json);
+        }
+      } catch (error) {
+        console.error('Failed to fetch dashboard', error);
+      } finally {
+        setLoading(false);
+      }
+    };
     fetchDashboard();
   }, [authFetch]);
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-96">
-        <div className="relative w-12 h-12">
-          <div className="absolute inset-0 border-4 border-emerald-500/20 rounded-full"></div>
-          <div className="absolute inset-0 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
-        </div>
-      </div>
-    );
-  }
+  const formatCurrency = (amount: number = 0) => {
+    return Number(amount || 0).toLocaleString('en-IN', { style: 'currency', currency: 'INR' });
+  };
 
-  if (error) {
-    return (
-      <div className="bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-900 p-6 rounded-3xl text-red-600 dark:text-red-400 font-bold flex flex-col items-center gap-4">
-        <span className="text-4xl">❌</span>
-        {error}
-        <button onClick={() => window.location.reload()} className="px-6 py-2 bg-red-600 text-white rounded-xl text-sm">Retry</button>
-      </div>
-    );
-  }
+  const getStatusBadge = (status: string) => {
+    switch (status?.toLowerCase()) {
+      case 'pending': return <span className="px-2.5 py-1 text-xs font-semibold rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">Pending</span>;
+      case 'confirmed': return <span className="px-2.5 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">Confirmed</span>;
+      case 'delivered': return <span className="px-2.5 py-1 text-xs font-semibold rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300">Delivered</span>;
+      case 'cancelled': return <span className="px-2.5 py-1 text-xs font-semibold rounded-full bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-300">Cancelled</span>;
+      default: return <span className="px-2.5 py-1 text-xs font-semibold rounded-full bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-200">{status || 'Active'}</span>;
+    }
+  };
 
-  if (!data) return null;
+  const dashboardData = {
+    kpis: {
+      totalOrders: data?.totalOrders ?? 0,
+      totalRevenue: Number(data?.totalRevenue ?? 0),
+      collections: Number(data?.totalCollected ?? 0),
+      pendingSettlements: data?.pendingSettlements ?? 0,
+    },
+    recentShipments: (data?.recentOrders && data.recentOrders.length > 0)
+      ? data.recentOrders.map((o: any) => ({
+          id: o?.invoiceNumber || `INV-${o?.id}`,
+          customer: o?.customer?.name || `Customer #${o?.customerId}`,
+          amount: Number(o?.grandTotal || 0),
+          status: o?.status || 'pending',
+          date: o?.createdAt || new Date().toISOString()
+        }))
+      : [],
+    activeReceivables: (data?.activeReceivables && data.activeReceivables.length > 0)
+      ? data.activeReceivables.map((r: any) => ({
+          customer: r?.customer?.name || `Customer #${r?.customerId}`,
+          invoice: r?.invoiceNumber || `INV-${r?.id}`,
+          total: Number(r?.grandTotal || 0),
+          paid: Number(r?.amountPaid || 0),
+          balance: Number(r?.balance || 0),
+          dueDate: r?.dueDate || new Date().toISOString()
+        }))
+      : [],
+    teamPerformance: (data?.salespeoplePerformance && data.salespeoplePerformance.length > 0)
+      ? data.salespeoplePerformance.map((sp: any) => ({
+          name: sp.name,
+          orders: sp.orderCount || 0,
+          sales: Number(sp.totalRevenue || 0),
+          collections: Number(sp.totalCollected || 0),
+          rate: sp.totalRevenue ? Math.round((Number(sp.totalCollected || 0) / Number(sp.totalRevenue)) * 100) : 0
+        }))
+      : []
+  };
 
-  const isManager = user?.role === 'manager' || user?.role === 'admin';
+  const today = new Date().toISOString().split('T')[0];
 
   return (
-    <div className="space-y-8 animate-fade-in max-w-7xl mx-auto">
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
-        <div>
-          <h1 className="text-4xl font-black text-zinc-900 dark:text-white tracking-tighter">Business Overview</h1>
-          <p className="text-zinc-500 dark:text-zinc-400 mt-1 font-medium">Tracking live distribution and cash settlements</p>
-          {lastRefreshed && (
-            <p className="text-[10px] text-zinc-400 mt-1 font-medium">Last updated: {lastRefreshed.toLocaleTimeString('en-IN')}</p>
-          )}
+    <div className="space-y-6 pb-12">
+      {/* Banner Card with Image */}
+      <div className="relative rounded-2xl overflow-hidden glass-card p-6 sm:p-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+        <div className="absolute inset-0 z-0">
+          <Image
+            src="/images/hero-banner.jpg"
+            alt="Haldiram ERP Banner"
+            fill
+            className="object-cover opacity-20 dark:opacity-30"
+            priority
+          />
+          <div className="absolute inset-0 bg-gradient-to-r from-slate-900/90 via-slate-900/60 to-transparent dark:from-slate-950/90" />
         </div>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={handleRefresh}
-            disabled={refreshing || loading}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-2xl text-xs font-bold uppercase tracking-widest text-zinc-700 dark:text-zinc-300 hover:border-emerald-500 hover:text-emerald-600 transition-colors disabled:opacity-60"
-          >
-            <svg className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
-            {refreshing ? 'Refreshing' : 'Refresh'}
-          </button>
-          <div className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 rounded-2xl border border-zinc-200 dark:border-zinc-700">
-            <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
-            <span className="text-[10px] font-black uppercase tracking-widest text-zinc-600 dark:text-zinc-400">System Healthy</span>
-          </div>
+
+        <div className="relative z-10 space-y-2 max-w-xl">
+          <span className="px-3 py-1 text-xs font-bold uppercase tracking-wider rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+            Distribution Hub Overview
+          </span>
+          <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+            Swami Sharanam ERP Dashboard
+          </h1>
+          <p className="text-slate-300 text-sm leading-relaxed">
+            Welcome back, <span className="font-semibold text-white">{user?.name || 'User'}</span>! Clean distribution metrics, GST billing, and route collections hub.
+          </p>
+        </div>
+
+        <div className="relative z-10 flex flex-wrap gap-3">
+          <Link href="/orders/new" className="btn-primary">
+            + New Order
+          </Link>
+          <Link href="/invoices" className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-semibold text-sm backdrop-blur-md transition-all">
+            📋 Copy-Paste Invoice Extractor
+          </Link>
         </div>
       </div>
 
-      {/* Primary Metrics */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-        {[
-          { label: 'Bills Added Today', val: data.stats.todayOrders, sub: formatCurrency(data.stats.todayRevenue), color: 'bg-emerald-600', icon: '📝' },
-          { label: 'Pending Today', val: `-${formatCurrency(data.stats.todayPending).replace('₹','')}`, sub: 'Uncollected bills', color: 'bg-amber-500', icon: '⏳' },
-          { label: 'Collections Confirmed', val: `+${formatCurrency(data.stats.todayCollected).replace('₹','')}`, sub: 'Cash & Online', color: 'bg-blue-600', icon: '💰' },
-          { label: 'Active Customers', val: data.stats.activeCustomers, sub: `Out of ${data.stats.totalCustomers} total`, color: 'bg-zinc-900', icon: '👥' },
-        ].map((stat, i) => (
-          <div key={i} className="group relative bg-white dark:bg-zinc-900 rounded-[2.5rem] p-6 shadow-soft border border-zinc-100 dark:border-zinc-800 hover:border-emerald-500 transition-all duration-300">
-            <div className={`absolute top-6 right-6 w-12 h-12 ${stat.color} rounded-2xl flex items-center justify-center text-xl shadow-lg shadow-black/10`}>
-              {stat.icon}
+      {/* KPI Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="glass-card p-5 animate-fade-in">
+          <div className="flex items-center gap-4">
+            <div className="p-3 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 shadow-lg shadow-blue-500/30">
+              <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" /></svg>
             </div>
-            <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1">{stat.label}</p>
-            <p className="text-3xl font-black text-zinc-900 dark:text-white tracking-tight">{stat.val}</p>
-            <p className="text-xs font-bold text-zinc-500 mt-2 flex items-center gap-1">
-               {stat.sub}
-            </p>
-          </div>
-        ))}
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {/* Recent Orders */}
-        <div className="bg-white dark:bg-zinc-900 rounded-[2.5rem] shadow-soft border border-zinc-100 dark:border-zinc-800 overflow-hidden">
-          <div className="p-8 pb-4 flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800">
-            <h2 className="text-xl font-black text-zinc-900 dark:text-white tracking-tight">Latest Shipments</h2>
-            <button className="text-xs font-bold text-emerald-600 hover:underline uppercase tracking-widest">View All</button>
-          </div>
-          <div className="divide-y divide-zinc-50 dark:divide-zinc-800/50">
-            {data.recentOrders.length === 0 ? (
-              <div className="p-12 text-center text-zinc-400 font-bold uppercase tracking-widest text-xs">No active orders</div>
-            ) : (
-              data.recentOrders.map((order: any) => (
-                <div key={order.id} className="p-6 flex items-center justify-between hover:bg-zinc-50 dark:hover:bg-zinc-800/30 transition-colors">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-zinc-100 dark:bg-zinc-800 rounded-2xl flex items-center justify-center text-xl">📦</div>
-                    <div>
-                      <p className="font-black text-zinc-900 dark:text-white tracking-tight leading-none mb-1">{order.invoiceNumber}</p>
-                      <p className="text-xs font-bold text-zinc-400 uppercase tracking-wider">{order.customerName}</p>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <p className="font-black text-zinc-900 dark:text-white mb-1">{formatCurrency(order.grandTotal)}</p>
-                    <span className={`text-[10px] font-black px-3 py-1 rounded-full uppercase tracking-widest ${
-                      order.status === 'delivered' ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400' :
-                      order.status === 'pending' ? 'bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400' :
-                      'bg-indigo-100 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400'
-                    }`}>{order.status}</span>
-                  </div>
-                </div>
-              ))
-            )}
+            <div>
+              <p className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Total Orders</p>
+              <h3 className="text-2xl font-black text-slate-900 dark:text-white mt-1">{dashboardData.kpis.totalOrders}</h3>
+            </div>
           </div>
         </div>
 
-        {/* Pending Settlements */}
-        <div className="bg-white dark:bg-zinc-900 rounded-[2.5rem] shadow-soft border border-zinc-100 dark:border-zinc-800 overflow-hidden">
-          <div className="p-8 pb-4 flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800">
-            <h2 className="text-xl font-black text-zinc-900 dark:text-white tracking-tight">Active Receivables</h2>
-            <button className="text-xs font-bold text-emerald-600 hover:underline uppercase tracking-widest">Collections</button>
+        <div className="glass-card p-5 animate-fade-in" style={{ animationDelay: '100ms' }}>
+          <div className="flex items-center gap-4">
+            <div className="p-3 rounded-xl bg-gradient-to-br from-emerald-400 to-teal-600 shadow-lg shadow-emerald-500/30">
+              <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+            </div>
+            <div>
+              <p className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Total Revenue</p>
+              <h3 className="text-2xl font-black text-slate-900 dark:text-white mt-1">{formatCurrency(dashboardData.kpis.totalRevenue)}</h3>
+            </div>
           </div>
-          <div className="divide-y divide-zinc-50 dark:divide-zinc-800/50">
-            {data.pendingSettlements.length === 0 ? (
-              <div className="p-12 text-center text-zinc-400 font-bold uppercase tracking-widest text-xs">All records settled! 🎉</div>
-            ) : (
-              data.pendingSettlements.map((item: any) => (
-                <div key={item.id} className="p-6 flex items-center justify-between hover:bg-zinc-50 dark:hover:bg-zinc-800/30 transition-colors">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-red-50 dark:bg-red-900/10 rounded-2xl flex items-center justify-center text-xl">💳</div>
-                    <div>
-                      <p className="font-black text-zinc-900 dark:text-white tracking-tight leading-none mb-1">{item.invoiceNumber}</p>
-                      <p className="text-xs font-bold text-zinc-400 uppercase tracking-wider">{item.customerName}</p>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <p className="font-black text-red-600 dark:text-red-400 mb-1">{formatCurrency(item.balance)}</p>
-                    <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest italic">Pending Collection</p>
-                  </div>
-                </div>
-              ))
-            )}
+        </div>
+
+        <div className="glass-card p-5 animate-fade-in" style={{ animationDelay: '200ms' }}>
+          <div className="flex items-center gap-4">
+            <div className="p-3 rounded-xl bg-gradient-to-br from-amber-400 to-orange-600 shadow-lg shadow-amber-500/30">
+              <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
+            </div>
+            <div>
+              <p className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Collections</p>
+              <h3 className="text-2xl font-black text-slate-900 dark:text-white mt-1">{formatCurrency(dashboardData.kpis.collections)}</h3>
+            </div>
+          </div>
+        </div>
+
+        <div className="glass-card p-5 animate-fade-in" style={{ animationDelay: '300ms' }}>
+          <div className="flex items-center gap-4">
+            <div className="p-3 rounded-xl bg-gradient-to-br from-rose-500 to-red-600 shadow-lg shadow-rose-500/30">
+              <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+            </div>
+            <div>
+              <p className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Pending Settlements</p>
+              <h3 className="text-2xl font-black text-slate-900 dark:text-white mt-1">{dashboardData.kpis.pendingSettlements}</h3>
+            </div>
           </div>
         </div>
       </div>
 
-      {isManager && data.salespersonStats.length > 0 && (
-        <div className="bg-white dark:bg-zinc-900 rounded-[2.5rem] shadow-soft border border-zinc-100 dark:border-zinc-800 overflow-hidden">
-          <div className="p-8 pb-4 border-b border-zinc-100 dark:border-zinc-800">
-            <h2 className="text-xl font-black text-zinc-900 dark:text-white tracking-tight">Representative Performance</h2>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="bg-zinc-50 dark:bg-zinc-800/50">
-                  <th className="px-8 py-5 text-left text-[10px] font-black text-zinc-400 uppercase tracking-widest">Representative</th>
-                  <th className="px-8 py-5 text-right text-[10px] font-black text-zinc-400 uppercase tracking-widest">Volume</th>
-                  <th className="px-8 py-5 text-right text-[10px] font-black text-zinc-400 uppercase tracking-widest">Revenue</th>
-                  <th className="px-8 py-5 text-center text-[10px] font-black text-zinc-400 uppercase tracking-widest">Status</th>
+      {/* Recent Shipments Table */}
+      <div className="glass-card p-6">
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-lg font-bold text-slate-900 dark:text-white">Recent Shipments</h2>
+          <Link href="/orders" className="text-sm font-semibold text-indigo-600 dark:text-indigo-400 hover:text-indigo-500">
+            View All &rarr;
+          </Link>
+        </div>
+        <div className="overflow-x-auto">
+          {dashboardData.recentShipments.length === 0 ? (
+            <div className="py-8 text-center text-slate-500 dark:text-slate-400 text-sm">
+              No recent orders found. Click <strong>+ New Order</strong> to create your first order.
+            </div>
+          ) : (
+            <table className="w-full text-left text-sm text-slate-700 dark:text-slate-300">
+              <thead className="text-xs uppercase bg-slate-100 dark:bg-slate-900 text-slate-600 dark:text-slate-400 border-b border-slate-200 dark:border-slate-800">
+                <tr>
+                  <th className="px-4 py-3 font-bold">Invoice #</th>
+                  <th className="px-4 py-3 font-bold">Customer</th>
+                  <th className="px-4 py-3 font-bold">Amount</th>
+                  <th className="px-4 py-3 font-bold">Status</th>
+                  <th className="px-4 py-3 font-bold">Date</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-                {data.salespersonStats.map((sp: any) => (
-                  <tr key={sp.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/30 transition-colors">
-                    <td className="px-8 py-6">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 bg-zinc-900 text-white rounded-lg flex items-center justify-center font-black text-xs">{sp.name.charAt(0)}</div>
-                        <span className="font-bold text-zinc-900 dark:text-white tracking-tight">{sp.name}</span>
-                      </div>
-                    </td>
-                    <td className="px-8 py-6 text-right font-black text-zinc-600 dark:text-zinc-400">{sp.orders}</td>
-                    <td className="px-8 py-6 text-right font-black text-zinc-900 dark:text-white">{formatCurrency(sp.revenue)}</td>
-                    <td className="px-8 py-6 text-center">
-                      <span className="w-2 h-2 bg-emerald-500 rounded-full inline-block ring-4 ring-emerald-500/20"></span>
-                    </td>
+              <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                {dashboardData.recentShipments.slice(0, 5).map((order: any, i: number) => (
+                  <tr key={i} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
+                    <td className="px-4 py-3.5 font-bold text-slate-900 dark:text-white">{order.id}</td>
+                    <td className="px-4 py-3.5 font-medium">{order.customer}</td>
+                    <td className="px-4 py-3.5 font-bold">{formatCurrency(order.amount)}</td>
+                    <td className="px-4 py-3.5">{getStatusBadge(order.status)}</td>
+                    <td className="px-4 py-3.5 text-slate-500 dark:text-slate-400">{new Date(order.date).toLocaleDateString('en-IN')}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          </div>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }

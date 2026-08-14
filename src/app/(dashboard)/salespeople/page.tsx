@@ -1,222 +1,249 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '@/components/AuthProvider';
 
-interface Salesperson {
-  id: number;
-  email: string;
-  name: string;
-  phone: string | null;
-  isActive: boolean;
-  totalOrders: number;
-  monthlyOrders: number;
-  totalRevenue: number;
-  monthlyRevenue: number;
-  totalCustomers: number;
-}
-
-function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('en-IN', {
-    style: 'currency',
-    currency: 'INR',
-    maximumFractionDigits: 0,
-  }).format(amount);
-}
-
-export default function SalespeopePage() {
+export default function SalespeoplePage() {
   const { user, authFetch } = useAuth();
-  const [salespeople, setSalespeople] = useState<Salesperson[]>([]);
+  
+  const [salespeople, setSalespeople] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showForm, setShowForm] = useState(false);
-  const [formData, setFormData] = useState({ email: '', password: '', name: '', phone: '' });
-  const [submitting, setSubmitting] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<any[]>([]);
+  
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingPerson, setEditingPerson] = useState<any>(null);
 
-  async function fetchSalespeople() {
+  const [formData, setFormData] = useState({
+    name: '',
+    email: '',
+    phone: '',
+    password: '',
+    role: 'salesperson',
+  });
+
+  const canAccess = user?.role === 'admin' || user?.role === 'manager';
+
+  const fetchSalespeople = async (isManualRefresh = false) => {
+    if (isManualRefresh) setRefreshing(true);
+    else setLoading(true);
     try {
       const res = await authFetch('/api/salespeople');
-      if (!res.ok) throw new Error('Failed to fetch');
-      const data = await res.json();
-      setSalespeople(data.salespeople);
+      if (res.ok) {
+        const data = await res.json();
+        const rawList = Array.isArray(data) ? data : (data.salespeople || []);
+        const formatted = rawList.map((sp: any) => ({
+          ...sp,
+          sales: Number(sp.sales || sp.totalRevenue || 0),
+          collections: Number(sp.collections || sp.totalCollected || 0),
+          orders: Number(sp.orders || sp.orderCount || 0),
+          customers: Number(sp.customers || sp.customerCount || 0),
+        }));
+        setSalespeople(formatted);
+        setLoading(false);
+        setRefreshing(false);
+        return;
+      }
     } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
+      console.error('Failed to fetch salespeople', err);
     }
-  }
+    
+    setSalespeople([]);
+    setLoading(false);
+    setRefreshing(false);
+  };
 
   useEffect(() => {
-    fetchSalespeople();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (canAccess) fetchSalespeople();
+  }, [canAccess]);
 
-  async function handleSubmit(e: React.FormEvent) {
+  const toggleSelectAll = () => {
+    if (selectedIds.length === salespeople.length) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(salespeople.map(sp => sp.id));
+    }
+  };
+
+  const toggleSelectOne = (id: any, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (selectedIds.includes(id)) {
+      setSelectedIds(selectedIds.filter(i => i !== id));
+    } else {
+      setSelectedIds([...selectedIds, id]);
+    }
+  };
+
+  const handleDeleteSingle = async (id: any, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm('Are you sure you want to delete this team member?')) return;
+    try {
+      setSalespeople(salespeople.filter(sp => sp.id !== id));
+      setSelectedIds(selectedIds.filter(i => i !== id));
+    } catch (err) {
+      console.error('Delete error', err);
+    }
+  };
+
+  const handleDeleteBulk = async () => {
+    if (selectedIds.length === 0) return;
+    if (!confirm(`Are you sure you want to delete ${selectedIds.length} selected team members?`)) return;
+    setSalespeople(salespeople.filter(sp => !selectedIds.includes(sp.id)));
+    setSelectedIds([]);
+  };
+
+  if (!canAccess) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full min-h-[60vh] text-center">
+        <svg className="w-20 h-20 text-rose-500 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+        </svg>
+        <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-100 mb-2">Access Denied</h2>
+        <p className="text-slate-500 max-w-md">You do not have permission to manage team members.</p>
+      </div>
+    );
+  }
+
+  const handleOpenAddModal = () => {
+    setEditingPerson(null);
+    setFormData({ name: '', email: '', phone: '', password: '', role: 'salesperson' });
+    setIsModalOpen(true);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSubmitting(true);
-    
     try {
       const res = await authFetch('/api/salespeople', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
+        body: JSON.stringify(formData)
       });
-      
       if (res.ok) {
-        setShowForm(false);
-        setFormData({ email: '', password: '', name: '', phone: '' });
-        fetchSalespeople();
+        setIsModalOpen(false);
+        fetchSalespeople(true);
       }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setSubmitting(false);
+    } catch (error) {
+      console.error('Failed to save team member', error);
     }
-  }
-
-  const isAdmin = user?.role === 'admin';
+  };
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div className="space-y-6 pb-12 animate-fade-in">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-800 dark:text-white">Salespeople</h1>
-          <p className="text-slate-500 dark:text-slate-400">Manage your sales team</p>
+          <h1 className="text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight">Sales Team Management</h1>
+          <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">Manage field agents, managers, and route performance</p>
         </div>
-        {isAdmin && (
+        <div className="flex items-center gap-3">
           <button
-            onClick={() => setShowForm(true)}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors"
+            onClick={() => fetchSalespeople(true)}
+            className="px-4 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-sm rounded-xl border border-slate-200 dark:border-slate-700 flex items-center gap-2 transition-all"
+            title="Refresh Data from Backend"
           >
-            <span>➕</span>
-            <span>Add Salesperson</span>
+            <svg className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            Refresh
           </button>
-        )}
+          {selectedIds.length > 0 && (
+            <button
+              onClick={handleDeleteBulk}
+              className="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-sm rounded-xl flex items-center gap-2 shadow-lg shadow-rose-500/20"
+            >
+              🗑️ Delete Selected ({selectedIds.length})
+            </button>
+          )}
+          {user?.role === 'admin' && (
+            <button onClick={handleOpenAddModal} className="btn-primary flex items-center gap-2">
+              + Add Member
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Salespeople Grid */}
+      {/* Grid List */}
       {loading ? (
-        <div className="p-8 text-center">
-          <div className="w-8 h-8 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {[1, 2, 3].map(i => (
+            <div key={i} className="glass-card p-6 h-48 animate-pulse flex flex-col justify-between">
+              <div className="h-6 bg-slate-200 dark:bg-slate-700 rounded w-1/2"></div>
+              <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-1/3"></div>
+            </div>
+          ))}
         </div>
       ) : salespeople.length === 0 ? (
-        <div className="bg-white dark:bg-slate-800 rounded-xl p-8 text-center text-slate-500 shadow-sm">
-          No salespeople found
+        <div className="glass-card p-12 text-center flex flex-col items-center justify-center">
+          <h3 className="text-lg font-bold text-slate-900 dark:text-white">No team members found</h3>
+          <p className="text-slate-500 dark:text-slate-400 mt-1">Click + Add Member or Refresh to reload team data.</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {salespeople.map((sp) => (
-            <div key={sp.id} className="bg-white dark:bg-slate-800 rounded-xl p-4 shadow-sm">
-              <div className="flex items-start justify-between mb-4">
+            <div key={sp.id} className="glass-card p-6 flex flex-col justify-between relative group">
+              <div className="flex justify-between items-start mb-4">
                 <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 rounded-full flex items-center justify-center text-lg font-bold">
-                    {sp.name.charAt(0)}
-                  </div>
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.includes(sp.id)}
+                    onChange={(e) => toggleSelectOne(sp.id, e as any)}
+                    className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                  />
                   <div>
-                    <h3 className="font-semibold text-slate-800 dark:text-white">{sp.name}</h3>
-                    <p className="text-sm text-slate-500">{sp.email}</p>
+                    <h3 className="font-bold text-slate-900 dark:text-white text-lg">{sp.name}</h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">{sp.email}</p>
                   </div>
                 </div>
-                <span className={`px-2 py-1 text-xs rounded-full ${
-                  sp.isActive 
-                    ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
-                    : 'bg-slate-100 text-slate-600'
-                }`}>
-                  {sp.isActive ? 'Active' : 'Inactive'}
+                <span className={`px-2.5 py-1 text-xs font-bold rounded-full ${sp.role === 'admin' ? 'bg-indigo-100 text-indigo-800' : 'bg-blue-100 text-blue-800'}`}>
+                  {sp.role}
                 </span>
               </div>
-              
-              {sp.phone && (
-                <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">📞 {sp.phone}</p>
-              )}
-              
-              <div className="grid grid-cols-2 gap-3">
-                <div className="bg-slate-50 dark:bg-slate-700/50 rounded-lg p-3 text-center">
-                  <p className="text-xs text-slate-500">This Month</p>
-                  <p className="font-bold text-slate-800 dark:text-white">{sp.monthlyOrders} orders</p>
-                  <p className="text-sm text-emerald-600">{formatCurrency(sp.monthlyRevenue)}</p>
+
+              <div className="grid grid-cols-2 gap-4 py-3 border-y border-slate-200 dark:border-slate-800 my-2">
+                <div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 font-bold">Sales</p>
+                  <p className="text-sm font-black text-slate-900 dark:text-white">₹{(sp.sales || 0).toLocaleString('en-IN')}</p>
                 </div>
-                <div className="bg-slate-50 dark:bg-slate-700/50 rounded-lg p-3 text-center">
-                  <p className="text-xs text-slate-500">All Time</p>
-                  <p className="font-bold text-slate-800 dark:text-white">{sp.totalOrders} orders</p>
-                  <p className="text-sm text-emerald-600">{formatCurrency(sp.totalRevenue)}</p>
+                <div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 font-bold">Collections</p>
+                  <p className="text-sm font-black text-emerald-600 dark:text-emerald-400">₹{(sp.collections || 0).toLocaleString('en-IN')}</p>
                 </div>
               </div>
-              
-              <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-700 text-center">
-                <span className="text-sm text-slate-500">👥 {sp.totalCustomers} customers assigned</span>
+
+              <div className="flex justify-between items-center pt-2">
+                <span className="text-xs text-slate-500 font-semibold">{sp.phone || 'No Phone'}</span>
+                <button onClick={(e) => handleDeleteSingle(sp.id, e)} className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/40">
+                  🗑️ Delete
+                </button>
               </div>
             </div>
           ))}
         </div>
       )}
 
-      {/* Add Salesperson Modal */}
-      {showForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-md">
-            <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-slate-800 dark:text-white">Add Salesperson</h2>
-              <button onClick={() => setShowForm(false)} className="text-slate-400 hover:text-slate-600">✕</button>
-            </div>
-            
-            <form onSubmit={handleSubmit} className="p-4 space-y-4">
+      {/* Add Modal */}
+      {isModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-sm p-4">
+          <div className="glass-card w-full max-w-md p-6 space-y-4">
+            <h2 className="text-xl font-bold text-slate-900 dark:text-white">Add Team Member</h2>
+            <form onSubmit={handleSubmit} className="space-y-3">
               <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Name *</label>
-                <input
-                  type="text"
-                  required
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  className="w-full px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white"
-                />
+                <label className="text-xs font-bold text-slate-600 dark:text-slate-400 mb-1 block">Full Name</label>
+                <input required type="text" className="input-field" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} placeholder="Amit Kumar" />
               </div>
-              
               <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Email *</label>
-                <input
-                  type="email"
-                  required
-                  value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  className="w-full px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white"
-                />
+                <label className="text-xs font-bold text-slate-600 dark:text-slate-400 mb-1 block">Email</label>
+                <input required type="email" className="input-field" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} placeholder="amit@haldiram.com" />
               </div>
-              
               <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Password *</label>
-                <input
-                  type="password"
-                  required
-                  value={formData.password}
-                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                  className="w-full px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white"
-                />
+                <label className="text-xs font-bold text-slate-600 dark:text-slate-400 mb-1 block">Password</label>
+                <input required type="password" className="input-field" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} placeholder="••••••••" />
               </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Phone</label>
-                <input
-                  type="tel"
-                  value={formData.phone}
-                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                  className="w-full px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white"
-                />
-              </div>
-              
-              <div className="flex gap-3 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setShowForm(false)}
-                  className="flex-1 py-2 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-700 dark:text-slate-300"
-                >
+              <div className="flex justify-end gap-3 pt-3">
+                <button type="button" onClick={() => setIsModalOpen(false)} className="px-4 py-2 text-xs font-semibold rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
                   Cancel
                 </button>
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg disabled:opacity-50"
-                >
-                  {submitting ? 'Adding...' : 'Add'}
+                <button type="submit" className="btn-primary">
+                  Save Member
                 </button>
               </div>
             </form>

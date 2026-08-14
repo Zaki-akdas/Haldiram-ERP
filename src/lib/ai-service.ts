@@ -1,61 +1,23 @@
-import { callOllama } from './ai-providers/ollama';
-import { callGemini } from './ai-providers/gemini';
-import { callAzureOpenAI } from './ai-providers/azure';
-import { callBazaarLink } from './ai-providers/bazaarlink';
-import { computeConfidence, normalizeExtraction } from './ai-extract';
-import type { AIProvider, AIConfig, AIExtractionResult } from './ai-provider';
-import { getDefaultConfig } from './ai-provider';
+import { AIProviderConfig, ExtractionResult } from './ai-provider';
+import { extractWithOllama } from './ai-providers/ollama';
+import { extractWithGemini } from './ai-providers/gemini';
+import { extractWithAzure } from './ai-providers/azure';
+import { extractWithBazaarLink } from './ai-providers/bazaarlink';
 
-export { type AIProvider, type AIConfig, type AIExtractionResult } from './ai-provider';
-export { getDefaultConfig } from './ai-provider';
-
-export async function extractWithProvider(text: string, config: AIConfig): Promise<AIExtractionResult> {
-  const truncated = text.length > 20000 ? text.substring(0, 20000) + '\n\n[TRUNCATED]' : text;
-  const resolvedConfig = getDefaultConfig(config.provider);
-  const effectiveConfig: AIConfig = {
-    ...resolvedConfig,
-    ...config,
-    model: config.model || resolvedConfig.model,
-  };
-
-  switch (effectiveConfig.provider) {
-    case 'ollama': {
-      const result = await callOllama(truncated, effectiveConfig.model, 60000);
-      if (result.error || !result.raw) return result;
-      return {
-        ...result,
-        normalized: normalizeExtraction(result.raw),
-        confidence: computeConfidence(normalizeExtraction(result.raw)),
-      };
+export async function extractWithProvider(text: string, provider: AIProviderConfig): Promise<ExtractionResult> {
+  try {
+    switch (provider.type) {
+      case 'ollama': return await extractWithOllama(text, provider);
+      case 'gemini': return await extractWithGemini(text, provider);
+      case 'azure': return await extractWithAzure(text, provider);
+      case 'bazaarlink': return await extractWithBazaarLink(text, provider);
+      default:
+        return { items: [], confidence: 0, provider: 'unknown' };
     }
-    case 'gemini': {
-      const result = await callGemini(truncated, effectiveConfig.model, effectiveConfig.maxTokens);
-      if (result.error || !result.raw) return result;
-      return {
-        ...result,
-        normalized: normalizeExtraction(result.raw),
-        confidence: computeConfidence(normalizeExtraction(result.raw)),
-      };
-    }
-    case 'azure': {
-      const result = await callAzureOpenAI(truncated, effectiveConfig.model, effectiveConfig.maxTokens);
-      if (result.error || !result.raw) return result;
-      return {
-        ...result,
-        normalized: normalizeExtraction(result.raw),
-        confidence: computeConfidence(normalizeExtraction(result.raw)),
-      };
-    }
-    case 'bazaarlink': {
-      const result = await callBazaarLink(truncated, effectiveConfig.model, 60000);
-      if (result.error || !result.raw) return result;
-      return {
-        ...result,
-        normalized: normalizeExtraction(result.raw),
-        confidence: computeConfidence(normalizeExtraction(result.raw)),
-      };
-    }
-    default:
-      return { raw: null, normalized: null, confidence: 0, error: `Unknown provider: ${effectiveConfig.provider}` };
+  } catch (error) {
+    return {
+      items: [], confidence: 0, provider: provider.name,
+      rawResponse: error instanceof Error ? error.message : 'Unknown error',
+    };
   }
 }

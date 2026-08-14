@@ -1,36 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseAdmin } from '@/db';
 import { getCurrentUser } from '@/lib/auth';
+import { db } from '@/db';
+import { activityLogs } from '@/db/schema';
 
-export async function POST(request: NextRequest) {
+export async function POST(req: NextRequest) {
   try {
-    const supabase = getSupabaseAdmin();
-    const authHeader = request.headers.get('authorization');
-    const token = authHeader?.replace(/^Bearer\s+/i, '');
-
-    if (token) {
-      const user = await getCurrentUser();
-
-      if (user) {
-        await supabase
-          .from('activity_logs')
-          .insert({
-            user_id: user.id,
-            activity_type: 'logout',
-            description: `User ${user.name} logged out`,
-            ip_address: request.headers.get('x-forwarded-for') || 'unknown',
-          });
-      }
-
-      await supabase.auth.signOut({ scope: 'global' });
+    const user = await getCurrentUser();
+    
+    if (user) {
+      await db.insert(activityLogs).values({
+        userId: user.id,
+        activityType: 'logout',
+        description: 'User logged out',
+        ipAddress: req.headers.get('x-forwarded-for') || 'unknown',
+      });
     }
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error('Logout error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: (error as Error).message || 'Internal server error' }, { status: 500 });
   }
 }

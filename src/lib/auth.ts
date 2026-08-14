@@ -1,28 +1,45 @@
-import { getSupabaseAdmin } from '@/db';
 import { headers } from 'next/headers';
+import { createAdminClient } from './supabase';
+import { db } from '@/db';
+import { eq } from 'drizzle-orm';
+import { users } from '@/db/schema';
 
 export async function getCurrentUser() {
   try {
-    const supabase = getSupabaseAdmin();
-    const hdrs = await headers();
-    const authHeader = hdrs.get('authorization');
-    if (!authHeader) return null;
-    const token = authHeader.replace(/^Bearer\s+/i, '');
+    const headersList = await headers();
+    const authHeader = headersList.get('authorization');
+    
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return null;
+    }
+    
+    const token = authHeader.split(' ')[1];
     if (!token) return null;
-
-    const { data, error } = await supabase.auth.getUser(token);
-    if (error || !data.user) return null;
-
+    
+    const supabase = createAdminClient();
+    const { data: { user: supabaseUser }, error } = await supabase.auth.getUser(token);
+    
+    if (error || !supabaseUser || !supabaseUser.email) {
+      return null;
+    }
+    
+    const email = supabaseUser.email;
+    
+    const dbUserList = await db.select().from(users).where(eq(users.email, email));
+    const dbUser = dbUserList[0];
+    
+    if (!dbUser) return null;
+    
     return {
-      id: parseInt(data.user.id),
-      email: data.user.email || '',
-      name: data.user.user_metadata?.name || data.user.email || '',
-      role: data.user.user_metadata?.role || 'salesperson',
-      phone: data.user.user_metadata?.phone || null,
-      avatar: data.user.user_metadata?.avatar || null,
-      isActive: true,
+      id: dbUser.id,
+      email: dbUser.email,
+      name: dbUser.name,
+      role: dbUser.role,
+      phone: dbUser.phone,
+      avatar: dbUser.avatar,
+      isActive: dbUser.isActive
     };
-  } catch {
+  } catch (error) {
     return null;
   }
 }
@@ -36,7 +53,7 @@ export function isAdmin(role: string): boolean {
 }
 
 export function isManager(role: string): boolean {
-  return role === 'manager' || role === 'admin';
+  return role === 'admin' || role === 'manager';
 }
 
 export function isSalesperson(role: string): boolean {

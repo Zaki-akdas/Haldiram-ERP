@@ -1,69 +1,91 @@
-export type AIProvider = 'ollama' | 'gemini' | 'azure' | 'bazaarlink';
+export type AIProviderType = 'ollama' | 'gemini' | 'azure' | 'bazaarlink';
 
-export interface AIConfig {
-  provider: AIProvider;
-  model: string;
-  temperature: number;
-  maxTokens: number;
+export interface AIProviderConfig {
+  type: AIProviderType;
+  name: string;
+  enabled: boolean;
+  url?: string;
+  apiKey?: string;
+  model?: string;
+  timeout?: number;
+  endpoint?: string;
+  deployment?: string;
+  apiVersion?: string;
 }
 
-export interface AIExtractionResult {
-  raw: any;
-  normalized: any;
+export interface ExtractionResult {
+  invoiceNumber?: string;
+  invoiceDate?: string;
+  customerName?: string;
+  customerGSTIN?: string;
+  customerAddress?: string;
+  items: ExtractionItem[];
+  subtotal?: number;
+  taxableAmount?: number;
+  cgst?: number;
+  sgst?: number;
+  igst?: number;
+  totalGst?: number;
+  grandTotal?: number;
   confidence: number;
-  error?: string;
+  provider: string;
+  rawResponse?: string;
 }
 
-export function getDefaultConfig(provider: AIProvider): AIConfig {
-  switch (provider) {
-    case 'ollama':
-      return {
-        provider: 'ollama',
-        model: process.env.OLLAMA_MODEL || 'llama3:latest',
-        temperature: 0.1,
-        maxTokens: 4096,
-      };
-    case 'gemini':
-      return {
-        provider: 'gemini',
-        model: process.env.GEMINI_MODEL || 'gemini-2.0-flash-lite',
-        temperature: 0.1,
-        maxTokens: 8192,
-      };
-    case 'azure':
-      return {
-        provider: 'azure',
-        model: process.env.AZURE_OPENAI_DEPLOYMENT || 'gpt-4o-mini',
-        temperature: 0.1,
-        maxTokens: 4096,
-      };
-    case 'bazaarlink':
-      return {
-        provider: 'bazaarlink',
-        model: process.env.AI_MODEL || 'glm-4.7',
-        temperature: 0.1,
-        maxTokens: 4096,
-      };
+export interface ExtractionItem {
+  srNo?: number;
+  erpId?: string;
+  productName: string;
+  hsnCode?: string;
+  quantity: number;
+  unit?: string;
+  unitPrice: number;
+  discount?: number;
+  taxableAmount?: number;
+  gstRate?: number;
+  gstAmount?: number;
+  totalAmount: number;
+}
+
+export function getAvailableProviders(): AIProviderConfig[] {
+  const providers: AIProviderConfig[] = [];
+  
+  if (process.env.GEMINI_API_KEY) {
+    providers.push({
+      type: 'gemini', name: 'Google Gemini', enabled: true,
+      apiKey: process.env.GEMINI_API_KEY,
+      model: process.env.GEMINI_MODEL || 'gemini-2.0-flash-lite',
+    });
   }
-}
-
-export function isProviderConfigured(provider: AIProvider): boolean {
-  switch (provider) {
-    case 'ollama':
-      return true; // always available locally
-    case 'gemini':
-      return !!process.env.GEMINI_API_KEY;
-    case 'azure':
-      return !!(process.env.AZURE_OPENAI_API_KEY && process.env.AZURE_OPENAI_ENDPOINT);
-    case 'bazaarlink':
-      return !!process.env.AI_API_KEY && !!process.env.AI_BASE_URL;
+  if (process.env.AZURE_OPENAI_API_KEY) {
+    providers.push({
+      type: 'azure', name: 'Azure OpenAI', enabled: true,
+      apiKey: process.env.AZURE_OPENAI_API_KEY,
+      endpoint: process.env.AZURE_OPENAI_ENDPOINT,
+      deployment: process.env.AZURE_OPENAI_DEPLOYMENT || 'gpt-4o-mini',
+      apiVersion: process.env.AZURE_OPENAI_API_VERSION || '2024-06-01',
+    });
   }
-}
-
-export function getAvailableProviders(): AIProvider[] {
-  const providers: AIProvider[] = ['ollama'];
-  if (process.env.GEMINI_API_KEY) providers.push('gemini');
-  if (process.env.AZURE_OPENAI_API_KEY && process.env.AZURE_OPENAI_ENDPOINT) providers.push('azure');
-  if (process.env.AI_API_KEY && process.env.AI_BASE_URL) providers.push('bazaarlink');
+  if (process.env.AI_API_KEY) {
+    providers.push({
+      type: 'bazaarlink', name: 'BazaarLink', enabled: true,
+      url: process.env.AI_BASE_URL || 'https://bazaarlink.ai/api/v1',
+      apiKey: process.env.AI_API_KEY,
+      model: process.env.AI_MODEL || 'glm-4.7',
+    });
+  }
+  if (process.env.OLLAMA_URL) {
+    providers.push({
+      type: 'ollama', name: 'Ollama (Local)', enabled: true,
+      url: process.env.OLLAMA_URL,
+      model: process.env.OLLAMA_MODEL || 'llama3:latest',
+      timeout: Number(process.env.OLLAMA_TIMEOUT) || 60000,
+    });
+  }
   return providers;
+}
+
+export function getDefaultProvider(): AIProviderConfig | null {
+  const providers = getAvailableProviders();
+  return providers.length > 0 ? providers[0] : null;
 }

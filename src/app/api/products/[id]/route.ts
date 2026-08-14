@@ -1,85 +1,73 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseAdmin } from '@/db';
-import { getCurrentUser } from '@/lib/auth';
+import { getCurrentUser, isManager } from '@/lib/auth';
+import { db } from '@/db';
+import { products, activityLogs } from '@/db/schema';
+import { eq } from 'drizzle-orm';
 
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+const allowedProductFields = ['erpId', 'name', 'description', 'category', 'unit', 'mrp', 'basePrice', 'gstRate', 'hsnCode', 'stockQty', 'isActive'];
+
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const supabase = getSupabaseAdmin();
     const user = await getCurrentUser();
-    if (!user || (user.role !== 'admin' && user.role !== 'manager')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
-    }
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    if (!isManager(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
     const { id } = await params;
-    const productId = parseInt(id, 10);
-    const body = await request.json();
+    const body = await req.json();
 
-    const { data: updated, error } = await supabase
-      .from('products')
-      .update({ ...body })
-      .eq('id', productId)
-      .select()
-      .single();
+    const updateData: any = { updatedAt: new Date() };
+    for (const field of allowedProductFields) {
+      if (body[field] !== undefined) {
+        updateData[field] = body[field];
+      }
+    }
 
-    if (error || !updated) return NextResponse.json({ error: 'Product not found' }, { status: 404 });
+    const [updated] = await db.update(products)
+      .set(updateData)
+      .where(eq(products.id, Number(id)))
+      .returning();
 
-    return NextResponse.json({ product: updated });
+    if (!updated) {
+       return NextResponse.json({ error: 'Product not found' }, { status: 404 });
+    }
+
+    await db.insert(activityLogs).values({
+      userId: user.id,
+      activityType: 'product_added',
+      entityType: 'product',
+      entityId: updated.id,
+      description: `Product ${updated.name} updated`
+    });
+
+    return NextResponse.json(updated);
   } catch (error) {
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: (error as Error).message }, { status: 500 });
   }
 }
 
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const supabase = getSupabaseAdmin();
     const user = await getCurrentUser();
-    if (!user || (user.role !== 'admin' && user.role !== 'manager')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
-    }
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    if (!isManager(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
     const { id } = await params;
-    const productId = parseInt(id, 10);
+    const productId = Number(id);
 
-    if (isNaN(productId)) return NextResponse.json({ error: 'Invalid product ID' }, { status: 400 });
-
-    const { data: linkedItems } = await supabase
-      .from('order_items')
-      .select('id')
-      .eq('product_id', productId)
-      .limit(1);
-
-    if (linkedItems && linkedItems.length > 0) {
-      return NextResponse.json({
-        error: 'Cannot delete product linked to existing orders. Mark it as inactive instead.',
-      }, { status: 400 });
+    const [deleted] = await db.delete(products).where(eq(products.id, productId)).returning();
+    
+    if (deleted) {
+        await db.insert(activityLogs).values({
+          userId: user.id,
+          activityType: 'product_added',
+          entityType: 'product',
+          entityId: Number(productId),
+          description: `Product ${deleted.name} deleted`
+        });
     }
-
-    const { data: deleted, error } = await supabase
-      .from('products')
-      .delete()
-      .eq('id', productId)
-      .select()
-      .single();
-
-    if (error || !deleted) return NextResponse.json({ error: 'Product not found' }, { status: 404 });
-
-    await supabase.from('activity_logs').insert({
-      user_id: user.id,
-      activity_type: 'product_added',
-      entity_type: 'product',
-      entity_id: productId,
-      description: `Deleted product ${deleted.name}`,
-    });
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error('Product delete error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: (error as Error).message }, { status: 500 });
   }
 }

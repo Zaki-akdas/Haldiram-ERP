@@ -1,381 +1,369 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/components/AuthProvider';
 
 interface Customer {
-  id: number;
+  id: string;
   name: string;
-  phone: string | null;
-  email: string | null;
-  gstin: string | null;
-  address: string | null;
-  city: string | null;
-  beat: string | null;
+  phone: string;
+  email: string;
+  gstin?: string;
+  pan?: string;
+  address: string;
+  city: string;
+  state: string;
+  pincode: string;
+  beat: string;
   creditLimit: number;
-  outstandingBalance: number;
-  salespersonName: string | null;
-  isActive: boolean;
+  outstanding: number;
+  assignedSalespersonId?: string;
+  salespersonName?: string;
 }
 
-interface Pagination {
-  page: number;
-  limit: number;
-  total: number;
-  totalPages: number;
+interface Salesperson {
+  id: string;
+  name: string;
 }
 
-function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('en-IN', {
-    style: 'currency',
-    currency: 'INR',
-    maximumFractionDigits: 0,
-  }).format(amount);
+interface PurchaseOrder {
+  id: string;
+  invoiceNumber: string;
+  date: string;
+  amount: number;
+  status: string;
+  paid: number;
+  balance: number;
 }
-
-const DeleteIcon = () => (
-  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-4v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-  </svg>
-);
-
-const EditIcon = () => (
-  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-  </svg>
-);
-
-const RefreshIcon = () => (
-  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-  </svg>
-);
 
 export default function CustomersPage() {
   const { user, authFetch } = useAuth();
   const [customers, setCustomers] = useState<Customer[]>([]);
-  const isManager = user?.role === 'admin' || user?.role === 'manager';
-  const [pagination, setPagination] = useState<Pagination>({ page: 1, limit: 20, total: 0, totalPages: 0 });
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [search, setSearch] = useState('');
-  const [showForm, setShowForm] = useState(false);
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [selectedIds, setSelectedIds] = useState<number[]>([]);
-  const [formData, setFormData] = useState({
-    name: '',
-    phone: '',
-    email: '',
-    gstin: '',
-    address: '',
-    city: '',
-    state: '',
-    beat: '',
-    creditLimit: '50000',
-  });
-  const [submitting, setSubmitting] = useState(false);
+  
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
+  const [saving, setSaving] = useState(false);
+  
+  const [salespeople, setSalespeople] = useState<Salesperson[]>([]);
+  
+  const [historyModalOpen, setHistoryModalOpen] = useState(false);
+  const [selectedCustomerForHistory, setSelectedCustomerForHistory] = useState<Customer | null>(null);
+  const [purchaseHistory, setPurchaseHistory] = useState<PurchaseOrder[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
-  async function fetchCustomers() {
-    setLoading(true);
+  const [formData, setFormData] = useState<Partial<Customer>>({
+    name: '', phone: '', email: '', gstin: '', pan: '', address: '',
+    city: '', state: '', pincode: '', beat: '', creditLimit: 0, assignedSalespersonId: ''
+  });
+
+  const canEdit = user?.role === 'admin' || user?.role === 'manager';
+
+  const fetchCustomers = async (isManualRefresh = false) => {
+    if (isManualRefresh) setRefreshing(true);
+    else setLoading(true);
     try {
-      const params = new URLSearchParams({
-        page: pagination.page.toString(),
-        limit: pagination.limit.toString(),
-        search,
-      });
-      
-      const res = await authFetch(`/api/customers?${params}`);
-      if (!res.ok) throw new Error('Failed to fetch');
-      
-      const data = await res.json();
-      setCustomers(data.customers);
-      setPagination(data.pagination);
-      setSelectedIds([]);
-    } catch (err) {
-      console.error(err);
+      const res = await authFetch(`/api/customers${search ? `?search=${encodeURIComponent(search)}` : ''}`);
+      if (res.ok) {
+        const data = await res.json();
+        setCustomers(Array.isArray(data) ? data : (data.customers || []));
+      } else {
+        setCustomers([]);
+      }
+    } catch (error) {
+      console.error('Failed to fetch customers', error);
+      setCustomers([]);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
-  }
+  };
+
+  const fetchSalespeople = async () => {
+    if (!canEdit) return;
+    try {
+      const res = await authFetch('/api/salespeople');
+      if (res.ok) {
+        const data = await res.json();
+        setSalespeople(Array.isArray(data) ? data : (data.salespeople || []));
+      }
+    } catch (error) {
+      console.error('Failed to fetch salespeople', error);
+    }
+  };
 
   useEffect(() => {
     fetchCustomers();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pagination.page, search]);
+    fetchSalespeople();
+  }, [search]);
 
-  const handleEdit = (customer: Customer) => {
-    setEditingId(customer.id);
-    setFormData({
-      name: customer.name,
-      phone: customer.phone || '',
-      email: customer.email || '',
-      gstin: customer.gstin || '',
-      address: customer.address || '',
-      city: customer.city || '',
-      state: '', // Not provided in initial interface
-      beat: customer.beat || '',
-      creditLimit: String(customer.creditLimit),
-    });
-    setShowForm(true);
+  const toggleSelectAll = () => {
+    if (selectedIds.length === customers.length) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(customers.map(c => c.id));
+    }
   };
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setSubmitting(true);
-    
+  const toggleSelectOne = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (selectedIds.includes(id)) {
+      setSelectedIds(selectedIds.filter(i => i !== id));
+    } else {
+      setSelectedIds([...selectedIds, id]);
+    }
+  };
+
+  const handleDeleteSingle = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm('Are you sure you want to delete this customer?')) return;
     try {
-      const method = editingId ? 'PATCH' : 'POST';
-      const url = editingId ? `/api/customers/${editingId}` : '/api/customers';
-      
-      // Note: Patch endpoint for customers doesn't exist yet, I'll create it
-      const res = await authFetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...formData,
-          creditLimit: parseFloat(formData.creditLimit),
-        }),
-      });
-      
+      const res = await authFetch(`/api/customers/${id}`, { method: 'DELETE' });
       if (res.ok) {
-        setShowForm(false);
-        setEditingId(null);
-        setFormData({ name: '', phone: '', email: '', gstin: '', address: '', city: '', state: '', beat: '', creditLimit: '50000' });
-        fetchCustomers();
+        setSelectedIds(selectedIds.filter(i => i !== id));
+        fetchCustomers(true);
+      }
+    } catch (error) {
+      console.error('Delete failed', error);
+    }
+  };
+
+  const handleDeleteBulk = async () => {
+    if (selectedIds.length === 0) return;
+    if (!confirm(`Are you sure you want to delete ${selectedIds.length} selected customers?`)) return;
+    try {
+      const res = await authFetch('/api/customers', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: selectedIds })
+      });
+      if (res.ok) {
+        setSelectedIds([]);
+        fetchCustomers(true);
+      }
+    } catch (err) {
+      console.error('Bulk delete error', err);
+    }
+  };
+
+  const openAddModal = () => {
+    setEditingCustomer(null);
+    setFormData({
+      name: '', phone: '', email: '', gstin: '', pan: '', address: '',
+      city: '', state: '', pincode: '', beat: '', creditLimit: 0, assignedSalespersonId: ''
+    });
+    setIsModalOpen(true);
+  };
+
+  const openEditModal = (c: Customer) => {
+    setEditingCustomer(c);
+    setFormData({ ...c });
+    setIsModalOpen(true);
+  };
+
+  const openHistory = async (c: Customer) => {
+    setSelectedCustomerForHistory(c);
+    setHistoryModalOpen(true);
+    setHistoryLoading(true);
+    try {
+      const res = await authFetch(`/api/customers/${c.id}/history`);
+      if (res.ok) {
+        const data = await res.json();
+        setPurchaseHistory(data.orders || []);
       }
     } catch (err) {
       console.error(err);
     } finally {
-      setSubmitting(false);
+      setHistoryLoading(false);
     }
-  }
+  };
 
-  async function handleDelete(id: number, name: string) {
-    if (!confirm(`Are you sure you want to delete customer "${name}"? This cannot be undone.`)) return;
-    
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
     try {
-      const res = await authFetch(`/api/customers/${id}`, { method: 'DELETE' });
+      const url = editingCustomer ? `/api/customers/${editingCustomer.id}` : '/api/customers';
+      const method = editingCustomer ? 'PATCH' : 'POST';
+      const res = await authFetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(formData)
+      });
       if (res.ok) {
-        fetchCustomers();
-      } else {
-        const data = await res.json();
-        alert(data.error || 'Failed to delete customer');
+        setIsModalOpen(false);
+        fetchCustomers(true);
       }
-    } catch (err) {
-      alert('Error deleting customer');
-    }
-  }
-
-  async function handleBulkDelete() {
-    if (!confirm(`Are you sure you want to delete ${selectedIds.length} customers?`)) return;
-    setLoading(true);
-    try {
-      for (const id of selectedIds) {
-        await authFetch(`/api/customers/${id}`, { method: 'DELETE' });
-      }
-      fetchCustomers();
-    } catch (err) {
-      alert('Some items could not be deleted (they may have existing orders)');
+    } catch (error) {
+      console.error('Save failed', error);
     } finally {
-      setLoading(false);
+      setSaving(false);
     }
-  }
+  };
 
-  const toggleSelect = (id: number) => {
-    setSelectedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
+  const formatCurrency = (amount: number = 0) => {
+    return Number(amount || 0).toLocaleString('en-IN', { style: 'currency', currency: 'INR' });
   };
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div className="p-6 max-w-7xl mx-auto animate-fade-in space-y-6">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <h1 className="text-2xl font-black text-zinc-900 dark:text-white tracking-tight">Customers</h1>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">Manage your verified customer database</p>
+          <h1 className="text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight">Customers Management</h1>
+          <p className="text-slate-500 dark:text-slate-400 mt-1 text-sm">Manage your distribution client base, GSTINs, credit limits, and balances</p>
         </div>
-        <div className="flex items-center gap-3">
+        
+        <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
           <button
-            onClick={() => fetchCustomers()}
-            className="p-2.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-xl hover:text-emerald-600 transition-colors border border-zinc-200 dark:border-zinc-700"
-            title="Refresh Data"
+            onClick={() => fetchCustomers(true)}
+            className="px-4 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-sm rounded-xl border border-slate-200 dark:border-slate-700 flex items-center gap-2 transition-all"
+            title="Refresh Data from Backend"
           >
-            <RefreshIcon />
+            <svg className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            Refresh
           </button>
-          <button
-            onClick={() => { setEditingId(null); setShowForm(true); }}
-            className="btn-primary"
-          >
-            <span className="text-xl">+</span>
-            <span>Add Customer</span>
-          </button>
+          {selectedIds.length > 0 && (
+            <button
+              onClick={handleDeleteBulk}
+              className="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-sm rounded-xl flex items-center gap-2 shadow-lg shadow-rose-500/20"
+            >
+              🗑️ Delete Selected ({selectedIds.length})
+            </button>
+          )}
+          {canEdit && (
+            <button onClick={openAddModal} className="btn-primary whitespace-nowrap flex items-center gap-2">
+              + Add Customer
+            </button>
+          )}
         </div>
       </div>
 
-      {selectedIds.length > 0 && isManager && (
-        <div className="bg-zinc-900 text-white px-6 py-4 rounded-[1.5rem] flex items-center justify-between shadow-cool animate-fade-in">
-          <p className="text-sm font-bold">{selectedIds.length} customers selected</p>
-          <button
-            onClick={handleBulkDelete}
-            className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 rounded-xl transition-all text-sm font-bold"
-          >
-            <DeleteIcon />
-            <span>Delete Selected</span>
-          </button>
-        </div>
-      )}
-
-      {/* Search */}
-      <div className="bg-white dark:bg-zinc-900 rounded-[1.5rem] p-4 shadow-soft border border-zinc-100 dark:border-zinc-800">
-        <div className="relative">
-          <span className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400">🔍</span>
+      {/* Filter Bar */}
+      <div className="glass-card p-4 flex justify-between items-center">
+        <div className="relative w-full sm:w-80">
+          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
           <input
             type="text"
-            placeholder="Search by name, phone, or GSTIN..."
+            placeholder="Search customers..."
+            className="input-field pl-10 w-full"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="input-field pl-11"
           />
         </div>
+        {customers.length > 0 && (
+          <button onClick={toggleSelectAll} className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline">
+            {selectedIds.length === customers.length ? 'Deselect All' : 'Select All Customers'}
+          </button>
+        )}
       </div>
 
-      {/* Customers Grid */}
-      {loading && customers.length === 0 ? (
-        <div className="p-20 text-center">
-          <div className="w-12 h-12 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
+      {loading ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+          {[1, 2, 3, 4, 5, 6].map(i => (
+            <div key={i} className="glass-card p-5 h-48 animate-pulse flex flex-col justify-between">
+              <div>
+                <div className="h-6 bg-slate-200 dark:bg-slate-800 rounded w-1/2 mb-2"></div>
+                <div className="h-4 bg-slate-200 dark:bg-slate-800 rounded w-1/3 mb-4"></div>
+                <div className="h-4 bg-slate-200 dark:bg-slate-800 rounded w-full mb-2"></div>
+                <div className="h-4 bg-slate-200 dark:bg-slate-800 rounded w-2/3"></div>
+              </div>
+            </div>
+          ))}
         </div>
       ) : customers.length === 0 ? (
-        <div className="bg-white dark:bg-zinc-900 rounded-[2rem] p-12 text-center shadow-soft border border-zinc-100 dark:border-zinc-800">
-          <p className="text-zinc-400 font-bold uppercase tracking-widest text-xs">No customers found</p>
+        <div className="glass-card p-12 text-center flex flex-col items-center justify-center">
+          <h3 className="text-lg font-bold text-slate-900 dark:text-white">No customers found</h3>
+          <p className="text-slate-500 dark:text-slate-400 mt-1">Adjust your search or click + Add Customer.</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {customers.map((customer) => (
-            <div key={customer.id} className={`group relative bg-white dark:bg-zinc-900 rounded-[2.5rem] p-6 shadow-soft border border-zinc-100 dark:border-zinc-800 hover:border-emerald-500 transition-all duration-300 ${selectedIds.includes(customer.id) ? 'border-emerald-500 bg-emerald-50/30 dark:bg-emerald-900/10' : ''}`}>
-              <div className="absolute top-6 left-6">
-                <input
-                  type="checkbox"
-                  checked={selectedIds.includes(customer.id)}
-                  onChange={() => toggleSelect(customer.id)}
-                  className="w-5 h-5 rounded-lg border-zinc-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
-                />
-              </div>
-
-              <div className="flex items-start justify-between mb-4 ml-8">
-                <div>
-                  <h3 className="font-black text-lg text-zinc-900 dark:text-white tracking-tight leading-tight">{customer.name}</h3>
-                  <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest mt-1">{customer.city || 'No Location'}</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+          {customers.map((c) => (
+            <div key={c.id} className="glass-card p-5 hover:-translate-y-1 transition-all duration-200 hover:shadow-xl cursor-pointer flex flex-col relative" onClick={() => openHistory(c)}>
+              <div className="flex justify-between items-start mb-2">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.includes(c.id)}
+                    onChange={(e) => toggleSelectOne(c.id, e as any)}
+                    onClick={(e) => e.stopPropagation()}
+                    className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <h3 className="text-lg font-bold text-slate-900 dark:text-white line-clamp-1">{c.name}</h3>
                 </div>
-                <div className="flex gap-2">
-                  <button 
-                    onClick={() => handleEdit(customer)}
-                    className="p-2 text-zinc-400 hover:text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded-xl transition-all"
-                    title="Edit Customer"
-                  >
-                    <EditIcon />
-                  </button>
-                  {isManager && (
-                    <button 
-                      onClick={() => handleDelete(customer.id, customer.name)}
-                      className="p-2 text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-all"
-                      title="Delete Customer"
-                    >
-                      <DeleteIcon />
-                    </button>
-                  )}
+                {c.gstin && <span className="bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300 rounded-full px-3 py-0.5 text-xs font-bold border border-indigo-200 dark:border-indigo-800">GSTIN</span>}
+              </div>
+              
+              <div className="space-y-1 mb-4 text-sm text-slate-600 dark:text-slate-400 flex-grow font-medium">
+                <div className="flex items-center gap-2">
+                  <svg className="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"/></svg>
+                  {c.phone || 'N/A'}
+                </div>
+                <div className="flex items-center gap-2">
+                  <svg className="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+                  {c.email || 'N/A'}
                 </div>
               </div>
               
-              <div className="space-y-2 text-xs font-bold mb-6 ml-8">
-                {customer.phone && (
-                  <div className="flex items-center gap-2 text-zinc-600 dark:text-zinc-400">
-                    <span>📞</span>
-                    <span>{customer.phone}</span>
-                  </div>
-                )}
-                {customer.gstin && (
-                  <div className="flex items-center gap-2 text-zinc-600 dark:text-zinc-400">
-                    <span>📄</span>
-                    <span className="font-mono">{customer.gstin}</span>
-                  </div>
-                )}
-                {customer.beat && (
-                  <div className="flex items-center gap-2 text-zinc-600 dark:text-zinc-400">
-                    <span>📍</span>
-                    <span className="uppercase tracking-wider">{customer.beat}</span>
-                  </div>
-                )}
-              </div>
-              
-              <div className="mt-4 pt-4 border-t border-zinc-50 dark:border-zinc-800 flex justify-between">
+              <div className="grid grid-cols-2 gap-4 mb-4 bg-slate-50 dark:bg-slate-800/50 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
                 <div>
-                  <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Balance</p>
-                  <p className={`text-lg font-black ${customer.outstandingBalance > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
-                    {formatCurrency(customer.outstandingBalance)}
+                  <p className="text-xs text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">Credit Limit</p>
+                  <p className="text-sm font-extrabold text-emerald-600 dark:text-emerald-400">{formatCurrency(c.creditLimit)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">Outstanding</p>
+                  <p className={`text-sm font-extrabold ${c.outstanding > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
+                    {formatCurrency(c.outstanding)}
                   </p>
                 </div>
-                <div className="text-right">
-                  <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Limit</p>
-                  <p className="text-lg font-black text-zinc-800 dark:text-white">{formatCurrency(customer.creditLimit)}</p>
-                </div>
+              </div>
+
+              <div className="flex items-center justify-between pt-3 border-t border-slate-200 dark:border-slate-800 mt-auto">
+                <span className="text-xs font-semibold text-slate-500">{c.salespersonName || 'Unassigned'}</span>
+                
+                {canEdit && (
+                  <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
+                    <button onClick={() => openEditModal(c)} className="p-1.5 text-indigo-600 hover:bg-indigo-50 rounded-lg">✏️</button>
+                    <button onClick={(e) => handleDeleteSingle(c.id, e)} className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg">🗑️</button>
+                  </div>
+                )}
               </div>
             </div>
           ))}
         </div>
       )}
 
-      {/* Form Modal */}
-      {showForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/40 backdrop-blur-sm p-4">
-          <div className="bg-white dark:bg-zinc-900 rounded-[2.5rem] w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-cool border border-zinc-200 dark:border-zinc-800 animate-fade-in">
-            <div className="p-8 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between bg-zinc-50/50 dark:bg-zinc-800/30">
-              <h2 className="text-xl font-black text-zinc-900 dark:text-white tracking-tight uppercase tracking-widest">
-                {editingId ? 'Edit Customer' : 'Add New Customer'}
-              </h2>
-              <button onClick={() => setShowForm(false)} className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-400 transition-colors font-bold text-xl">✕</button>
-            </div>
-            
-            <form onSubmit={handleSubmit} className="p-8 space-y-6">
-              <div className="space-y-4">
+      {/* Add/Edit Modal */}
+      {isModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-sm p-4">
+          <div className="glass-card w-full max-w-lg p-6 space-y-4">
+            <h2 className="text-xl font-bold text-slate-900 dark:text-white">{editingCustomer ? 'Edit Customer' : 'Add Customer'}</h2>
+            <form onSubmit={handleSave} className="space-y-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Name *</label>
+                <input required type="text" className="input-field" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} placeholder="Raju Stores" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs font-black text-zinc-400 uppercase tracking-widest ml-1">Full Name *</label>
-                  <input type="text" required value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} className="input-field mt-1" />
+                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Phone</label>
+                  <input type="text" className="input-field" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} placeholder="+91 9876543210" />
                 </div>
-                
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-xs font-black text-zinc-400 uppercase tracking-widest ml-1">Phone</label>
-                    <input type="tel" value={formData.phone} onChange={(e) => setFormData({ ...formData, phone: e.target.value })} className="input-field mt-1" />
-                  </div>
-                  <div>
-                    <label className="text-xs font-black text-zinc-400 uppercase tracking-widest ml-1">Email</label>
-                    <input type="email" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} className="input-field mt-1" />
-                  </div>
-                </div>
-                
                 <div>
-                  <label className="text-xs font-black text-zinc-400 uppercase tracking-widest ml-1">GSTIN</label>
-                  <input type="text" value={formData.gstin} onChange={(e) => setFormData({ ...formData, gstin: e.target.value.toUpperCase() })} maxLength={15} className="input-field mt-1 font-mono" placeholder="23AMFPV..." />
-                </div>
-                
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-xs font-black text-zinc-400 uppercase tracking-widest ml-1">City</label>
-                    <input type="text" value={formData.city} onChange={(e) => setFormData({ ...formData, city: e.target.value })} className="input-field mt-1" />
-                  </div>
-                  <div>
-                    <label className="text-xs font-black text-zinc-400 uppercase tracking-widest ml-1">Beat / Route</label>
-                    <input type="text" value={formData.beat} onChange={(e) => setFormData({ ...formData, beat: e.target.value })} className="input-field mt-1" />
-                  </div>
-                </div>
-                
-                <div>
-                  <label className="text-xs font-black text-zinc-400 uppercase tracking-widest ml-1">Credit Limit</label>
-                  <input type="number" value={formData.creditLimit} onChange={(e) => setFormData({ ...formData, creditLimit: e.target.value })} className="input-field mt-1 font-bold text-emerald-600" />
+                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">GSTIN</label>
+                  <input type="text" className="input-field" value={formData.gstin} onChange={e => setFormData({...formData, gstin: e.target.value})} placeholder="23AMFPV..." />
                 </div>
               </div>
-              
-              <div className="flex gap-4 pt-4">
-                <button type="button" onClick={() => setShowForm(false)} className="flex-1 py-4 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 rounded-xl font-bold uppercase tracking-widest text-xs">Cancel</button>
-                <button type="submit" disabled={submitting} className="btn-primary flex-1 py-4 text-xs uppercase tracking-widest">
-                  {submitting ? 'Processing...' : editingId ? 'Update Customer' : 'Save Customer'}
+              <div className="flex justify-end gap-3 pt-3">
+                <button type="button" onClick={() => setIsModalOpen(false)} className="px-4 py-2 text-xs font-semibold rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                  Cancel
+                </button>
+                <button type="submit" disabled={saving} className="btn-primary">
+                  {saving ? 'Saving...' : 'Save Customer'}
                 </button>
               </div>
             </form>
