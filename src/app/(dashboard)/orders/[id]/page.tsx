@@ -141,7 +141,7 @@ export default function OrderDetailPage() {
             notes: s.notes || '',
           })),
         });
-        setPaymentAmount(balance > 0 ? balance : 0);
+        setPaymentAmount(balance > 0 ? Math.round(balance * 100) / 100 : 0);
         setLoading(false);
       } catch (e) {
         console.error(e);
@@ -456,7 +456,7 @@ export default function OrderDetailPage() {
             <h3 className="font-bold text-white">Payment History</h3>
             {order.financials.balance > 0 && (
               <button 
-                onClick={() => { setPaymentAmount(order.financials.balance); setShowPaymentModal(true); }}
+                onClick={() => { setPaymentAmount(Math.round(order.financials.balance * 100) / 100); setShowPaymentModal(true); }}
                 className="btn-primary py-1.5 px-3 text-sm"
               >
                 Record Payment
@@ -523,7 +523,7 @@ export default function OrderDetailPage() {
             <div className="space-y-4">
               <div>
                 <label className="text-sm font-medium text-gray-300 mb-1 block">Payment Mode</label>
-                <div className="grid grid-cols-4 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   {['Cash', 'Online', 'Cheque', 'Split'].map(mode => (
                     <button
                       key={mode}

@@ -22,7 +22,19 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     }
 
     const [customer] = await db.select().from(customers).where(eq(customers.id, order.customerId));
-    const [salesperson] = await db.select().from(users).where(eq(users.id, order.salespersonId));
+    // Only safe columns — never the password hash.
+    const [salesperson] = await db
+      .select({
+        id: users.id,
+        name: users.name,
+        email: users.email,
+        role: users.role,
+        phone: users.phone,
+        avatar: users.avatar,
+        isActive: users.isActive,
+      })
+      .from(users)
+      .where(eq(users.id, order.salespersonId));
 
     const items = await db.select().from(orderItems).where(eq(orderItems.orderId, orderId));
 

@@ -392,7 +392,7 @@ export default function ProductsPage() {
                   <input type="text" className="input-field" value={formData.hsnCode || ''} onChange={e => setFormData({...formData, hsnCode: e.target.value})} placeholder="21069099" />
                 </div>
               </div>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="text-xs font-bold text-slate-600 dark:text-slate-400 mb-1 block">MRP (₹)</label>
                   <input type="number" step="0.01" className="input-field" value={formData.mrp || 0} onChange={e => setFormData({...formData, mrp: parseFloat(e.target.value)})} />

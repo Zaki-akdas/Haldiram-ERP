@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { db } from '@/db';
-import { orders, orderItems, customers, users, activityLogs } from '@/db/schema';
+import { orders, orderItems, customers, users, activityLogs, settlements } from '@/db/schema';
 import { eq, desc, and, count, gte, lte, like, or } from 'drizzle-orm';
 
 function parseSafeDate(val: any): Date | null {
@@ -309,6 +309,8 @@ export async function DELETE(req: NextRequest) {
 
     for (const id of ids) {
       await db.delete(orderItems).where(eq(orderItems.orderId, id));
+      // Payment records reference the order — remove them so no orphans remain.
+      await db.delete(settlements).where(eq(settlements.orderId, id));
       await db.delete(orders).where(eq(orders.id, id));
     }
 

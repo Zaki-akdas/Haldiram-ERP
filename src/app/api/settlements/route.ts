@@ -94,10 +94,27 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { orderId, customerId, salespersonId, amount, cashAmount, onlineAmount, paymentMode, denominations, clearingDays, referenceNumber, notes } = body;
 
+    if (!orderId) {
+      return NextResponse.json({ error: 'orderId is required' }, { status: 400 });
+    }
+    if (amount === undefined || amount === null || isNaN(Number(amount))) {
+      return NextResponse.json({ error: 'amount is required' }, { status: 400 });
+    }
+
+    // Resolve the order first: its customer/salesperson back the settlement,
+    // and it drives the balance update below (orderId may be a string).
+    const [order] = await db.select().from(orders).where(eq(orders.id, Number(orderId)));
+    if (!order) {
+      return NextResponse.json({ error: 'Order not found' }, { status: 404 });
+    }
+
+    const actualCustomerId = Number(customerId) || order.customerId;
+    const actualSalespersonId = Number(salespersonId) || order.salespersonId;
+
     const [newSettlement] = await db.insert(settlements).values({
-      orderId,
-      customerId,
-      salespersonId: salespersonId || user.id,
+      orderId: order.id,
+      customerId: actualCustomerId,
+      salespersonId: actualSalespersonId,
       amount: amount.toString(),
       cashAmount: cashAmount?.toString() || '0',
       onlineAmount: onlineAmount?.toString() || '0',
@@ -108,35 +125,31 @@ export async function POST(req: NextRequest) {
       notes,
     }).returning();
 
-    const [order] = await db.select().from(orders).where(eq(orders.id, orderId));
-    
-    if (order) {
-      const newAmountPaid = Number(order.amountPaid) + Number(amount);
-      const balance = Number(order.grandTotal) - newAmountPaid;
-      
-      let settlementStatus = 'pending';
-      if (balance <= 0) {
-        settlementStatus = 'settled';
-      } else if (newAmountPaid > 0) {
-        settlementStatus = 'partial';
-      }
+    const newAmountPaid = Number(order.amountPaid) + Number(amount);
+    const balance = Number(order.grandTotal) - newAmountPaid;
 
-      await db.update(orders)
-        .set({
-          amountPaid: newAmountPaid.toString(),
-          balance: Math.max(0, balance).toString(),
-          settlementStatus: settlementStatus as any,
-          updatedAt: new Date()
-        })
-        .where(eq(orders.id, orderId));
+    let settlementStatus = 'pending';
+    if (balance <= 0) {
+      settlementStatus = 'settled';
+    } else if (newAmountPaid > 0) {
+      settlementStatus = 'partial';
     }
+
+    await db.update(orders)
+      .set({
+        amountPaid: newAmountPaid.toString(),
+        balance: Math.max(0, balance).toString(),
+        settlementStatus: settlementStatus as any,
+        updatedAt: new Date()
+      })
+      .where(eq(orders.id, order.id));
 
     await db.insert(activityLogs).values({
       userId: user.id,
       activityType: 'settlement',
       entityType: 'settlement',
       entityId: newSettlement.id,
-      description: `Settlement of ₹${amount} recorded for Order #${orderId}`
+      description: `Settlement of ₹${amount} recorded for Order #${order.id}`
     });
 
     return NextResponse.json(newSettlement, { status: 201 });

@@ -22,8 +22,19 @@ export async function GET() {
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     if (!isManager(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
+    // Only return safe columns — never the password hash or other auth internals.
     const salespeopleList = await db
-      .select()
+      .select({
+        id: users.id,
+        name: users.name,
+        email: users.email,
+        role: users.role,
+        phone: users.phone,
+        avatar: users.avatar,
+        isActive: users.isActive,
+        createdAt: users.createdAt,
+        updatedAt: users.updatedAt,
+      })
       .from(users)
       .where(inArray(users.role, ['salesperson', 'manager']));
 
