@@ -38,9 +38,37 @@ jobs:
       - name: Test
         run: npm test
 
+  migrate:
+    name: Apply Database Migrations
+    needs: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Applies pending drizzle migrations against the production database
+      # before the new code ships. Requires the DATABASE_URL secret (Settings →
+      # Secrets and variables → Actions → new repository secret).
+      - name: Run migrations
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: npm run db:migrate
+
   deploy:
     name: Deploy to Vercel (Production)
-    needs: quality
+    needs: [quality, migrate]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
