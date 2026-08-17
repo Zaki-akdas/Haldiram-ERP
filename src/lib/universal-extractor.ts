@@ -230,18 +230,20 @@ function parseDelimitedTable(lines: string[], delimiter: string, formatName: Uni
     if (isHeader) {
       headerIndex = i;
       cols.forEach((col, idx) => {
+        // else-if chain: a column is assigned to its first matching role so
+        // ambiguous names (e.g. 'HSN Code', 'GST Rate %') can't steal erpId/unitPrice.
         if (col.includes('sr') || col === 's.no' || col === 's no') colIndexes.srNo = idx;
-        if (col.includes('sku') || col.includes('code') || col.includes('erp')) colIndexes.erpId = idx;
-        if (col.includes('item') || col.includes('product') || col.includes('description') || col.includes('name')) colIndexes.productName = idx;
-        if (col.includes('hsn')) colIndexes.hsnCode = idx;
-        if (col.includes('mrp')) colIndexes.mrp = idx;
-        if (col.includes('case')) colIndexes.cases = idx;
-        if (col.includes('qty') || col.includes('quantity')) colIndexes.quantity = idx;
-        if (col.includes('rate') || col.includes('price') || col.includes('unit price')) colIndexes.unitPrice = idx;
-        if (col.includes('taxable') || col.includes('base')) colIndexes.taxableAmount = idx;
-        if (col.includes('gst %') || col.includes('tax %') || col.includes('rate %')) colIndexes.gstRate = idx;
-        if (col.includes('gst amt') || col.includes('tax amt')) colIndexes.gstAmount = idx;
-        if (col.includes('total')) colIndexes.totalAmount = idx;
+        else if (col.includes('item') || col.includes('product') || col.includes('description') || col.includes('name')) colIndexes.productName = idx;
+        else if (col.includes('hsn')) colIndexes.hsnCode = idx;
+        else if (col.includes('sku') || col.includes('code') || col.includes('erp')) colIndexes.erpId = idx;
+        else if (col.includes('mrp')) colIndexes.mrp = idx;
+        else if (col.includes('case')) colIndexes.cases = idx;
+        else if (col.includes('qty') || col.includes('quantity')) colIndexes.quantity = idx;
+        else if (col.includes('gst %') || col.includes('tax %') || col.includes('rate %')) colIndexes.gstRate = idx;
+        else if (col.includes('unit price') || col.includes('price') || col.includes('rate')) colIndexes.unitPrice = idx;
+        else if (col.includes('taxable') || col.includes('base')) colIndexes.taxableAmount = idx;
+        else if (col.includes('gst amt') || col.includes('tax amt')) colIndexes.gstAmount = idx;
+        else if (col.includes('total')) colIndexes.totalAmount = idx;
       });
       break;
     }
@@ -549,33 +551,45 @@ function parseUnstructuredInvoice(text: string): UniversalExtractionResult {
 }
 
 // JSON Object Parser
-function parseFromJsonObject(obj: any, rawText: string): UniversalExtractionResult {
-  const get = (o: any, keys: string[]): any => {
+function parseFromJsonObject(obj: unknown, rawText: string): UniversalExtractionResult {
+  const get = (o: unknown, keys: string[]): unknown => {
     if (!o || typeof o !== 'object') return undefined;
+    const rec = o as Record<string, unknown>;
     for (const k of keys) {
-      if (o[k] !== undefined && o[k] !== null) return o[k];
+      if (rec[k] !== undefined && rec[k] !== null) return rec[k];
     }
     return undefined;
+  };
+  const getString = (o: unknown, keys: string[]): string | undefined => {
+    const val = get(o, keys);
+    return val == null ? undefined : String(val);
   };
 
   // Support the real-world nested invoice shape: { invoice: { invoice_number, bill_date },
   //   seller/buyer: { firm_name, gstin }, items: [{ sno, erp_id, item_name, taxable_value,
   //   gst_percent, gst_amount, total_value }], summary: { taxable_value, gst_amount, total_value } }
-  const inv = (obj && typeof obj === 'object' && typeof obj.invoice === 'object') ? obj.invoice : obj;
-  const seller = (obj && typeof obj === 'object' && typeof obj.seller === 'object') ? obj.seller : obj;
-  const buyer = (obj && typeof obj === 'object' && typeof obj.buyer === 'object') ? obj.buyer : obj;
-  const summary = (obj && typeof obj === 'object' && typeof obj.summary === 'object') ? obj.summary : obj;
+  const root = (obj && typeof obj === 'object') ? obj as Record<string, unknown> : undefined;
+  const inv = (root && typeof root.invoice === 'object') ? root.invoice as Record<string, unknown> : root;
+  const seller = (root && typeof root.seller === 'object') ? root.seller as Record<string, unknown> : root;
+  const buyer = (root && typeof root.buyer === 'object') ? root.buyer as Record<string, unknown> : root;
+  const summary = (root && typeof root.summary === 'object') ? root.summary as Record<string, unknown> : root;
 
   const items: UniversalItem[] = [];
-  const rawItems = Array.isArray(obj) ? obj : (obj.items || obj.data || obj.lineItems || []);
+  const firstArray = (...vals: unknown[]): unknown[] => {
+    for (const v of vals) {
+      if (Array.isArray(v)) return v as unknown[];
+    }
+    return [];
+  };
+  const rawItems = firstArray(obj, root?.items, root?.data, root?.lineItems);
 
-  rawItems.forEach((it: any, index: number) => {
+  rawItems.forEach((it: unknown, index: number) => {
     const gstRate = parseNumber(get(it, ['gstRate', 'gst_rate', 'gstPercent', 'gst_percent', 'gst%', 'gst']));
     items.push({
       srNo: parseNumber(get(it, ['srNo', 'sr', 'sno', 'slNo'])) || index + 1,
-      erpId: get(it, ['erpId', 'erp_id', 'sku', 'code', 'itemCode', 'item_code']),
-      productName: get(it, ['productName', 'product_name', 'product', 'name', 'itemName', 'item_name', 'description']) || `Item ${index + 1}`,
-      hsnCode: get(it, ['hsnCode', 'hsn_code', 'hsn']) != null ? String(get(it, ['hsnCode', 'hsn_code', 'hsn'])) : undefined,
+      erpId: getString(it, ['erpId', 'erp_id', 'sku', 'code', 'itemCode', 'item_code']),
+      productName: getString(it, ['productName', 'product_name', 'product', 'name', 'itemName', 'item_name', 'description']) || `Item ${index + 1}`,
+      hsnCode: getString(it, ['hsnCode', 'hsn_code', 'hsn']),
       mrp: parseNumber(get(it, ['mrp'])),
       quantity: parseNumber(get(it, ['quantity', 'qty'])) || 1,
       unitPrice: parseNumber(get(it, ['unitPrice', 'unit_price', 'price', 'rate'])) || 0,
@@ -588,12 +602,12 @@ function parseFromJsonObject(obj: any, rawText: string): UniversalExtractionResu
 
   return {
     detectedFormat: 'JSON',
-    invoiceNumber: get(inv, ['invoiceNumber', 'invoice_number', 'invoiceNo', 'invoice_no', 'billNumber', 'bill_number']),
-    invoiceDate: get(inv, ['invoiceDate', 'invoice_date', 'billDate', 'bill_date', 'date']),
-    sellerName: get(seller, ['sellerName', 'seller_name', 'firmName', 'firm_name', 'name']),
-    sellerGSTIN: get(seller, ['sellerGSTIN', 'seller_gstin', 'gstin']),
-    customerName: get(buyer, ['customerName', 'customer_name', 'buyerName', 'buyer_name', 'firmName', 'firm_name', 'name']),
-    customerGSTIN: get(buyer, ['customerGSTIN', 'customer_gstin', 'gstin']),
+    invoiceNumber: getString(inv, ['invoiceNumber', 'invoice_number', 'invoiceNo', 'invoice_no', 'billNumber', 'bill_number']),
+    invoiceDate: getString(inv, ['invoiceDate', 'invoice_date', 'billDate', 'bill_date', 'date']),
+    sellerName: getString(seller, ['sellerName', 'seller_name', 'firmName', 'firm_name', 'name']),
+    sellerGSTIN: getString(seller, ['sellerGSTIN', 'seller_gstin', 'gstin']),
+    customerName: getString(buyer, ['customerName', 'customer_name', 'buyerName', 'buyer_name', 'firmName', 'firm_name', 'name']),
+    customerGSTIN: getString(buyer, ['customerGSTIN', 'customer_gstin', 'gstin']),
     items,
     subtotal: parseNumber(get(summary, ['subtotal', 'sub_total', 'taxableAmount', 'taxable_amount', 'grossAmount', 'gross_amount'])) || parseNumber(get(obj, ['subtotal', 'taxableAmount'])),
     taxableAmount: parseNumber(get(summary, ['taxableAmount', 'taxable_amount', 'taxable', 'grossAmount', 'gross_amount'])) || parseNumber(get(obj, ['taxableAmount', 'taxable_amount'])),
@@ -655,7 +669,7 @@ function extractHeaderMeta(text: string) {
   };
 }
 
-function parseNumber(val: any): number {
+function parseNumber(val: unknown): number {
   if (typeof val === 'number') return isNaN(val) ? 0 : val;
   if (!val) return 0;
   const cleaned = String(val).replace(/,/g, '').replace(/[^\d.-]/g, '').trim();

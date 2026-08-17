@@ -6,7 +6,7 @@ export async function parseExcel(fileBuffer: Buffer, fileName: string): Promise<
 
   try {
     const xlsxModule = await import('xlsx');
-    const XLSX = (xlsxModule as any).default || xlsxModule;
+    const XLSX = (xlsxModule as unknown as { default?: typeof xlsxModule }).default || xlsxModule;
     const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
     const firstSheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[firstSheetName];
@@ -22,7 +22,7 @@ export async function parseExcel(fileBuffer: Buffer, fileName: string): Promise<
       };
     }
 
-    const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: '' }) as any[];
+    const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: '' }) as Record<string, unknown>[];
     
     if (jsonData.length === 0) {
       return {

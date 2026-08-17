@@ -7,6 +7,71 @@ import { useAuth } from '@/components/AuthProvider';
 
 const DENOMINATIONS = [500, 200, 100, 50, 20, 10, 5, 2, 1] as const;
 
+interface OrderItemView {
+  id: number;
+  name: string;
+  erpId: string;
+  qty: number;
+  shortQty: number;
+  returnQty: number;
+  unitPrice: number;
+  discount: number;
+  taxable: number;
+  gstRate: number;
+  gstAmt: number;
+  total: number;
+  productId: number | null;
+  product: {
+    id: number;
+    erpId: string;
+    name: string;
+    basePrice: number;
+    gstRate: number;
+    unit: string;
+  } | null;
+  priceMismatch: boolean;
+  gstMismatch: boolean;
+}
+
+interface PaymentView {
+  id: number;
+  date: string;
+  amount: number;
+  cash: number;
+  online: number;
+  mode: string;
+  reference: string;
+  notes: string;
+  denominations?: { denomination: number; quantity: number }[];
+}
+
+interface OrderDetailView {
+  id: number;
+  customerId: number | null;
+  invoiceNumber: string | null;
+  status: string;
+  date: string;
+  customerName: string;
+  customerPhone: string;
+  salesperson: string;
+  beat: string;
+  creditDays: number;
+  dueDate: string;
+  items: OrderItemView[];
+  summary: {
+    subtotal: number;
+    discount: number;
+    taxable: number;
+    cgst: number;
+    sgst: number;
+    igst: number;
+    totalGst: number;
+    grandTotal: number;
+  };
+  financials: { paid: number; balance: number };
+  payments: PaymentView[];
+}
+
 function CashDenominationInput({ amount, onChange }: { amount: number; onChange: (denoms: { denomination: number; quantity: number }[]) => void }) {
   const [denoms, setDenoms] = useState<{ denomination: number; quantity: number }[]>(
     DENOMINATIONS.map(d => ({ denomination: d, quantity: 0 }))
@@ -58,7 +123,7 @@ export default function OrderDetailPage() {
   const id = params.id as string;
   const { authFetch } = useAuth();
   
-  const [order, setOrder] = useState<any>(null);
+  const [order, setOrder] = useState<OrderDetailView | null>(null);
   const [loading, setLoading] = useState(true);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   
@@ -80,45 +145,65 @@ export default function OrderDetailPage() {
         if (!res.ok) throw new Error('Failed to fetch order');
         const json = await res.json();
         if (!mounted) return;
-        const apiOrder = json.order;
-        const apiItems = json.items || [];
-        const apiCustomer = json.customer || {};
-        const apiSalesperson = json.salesperson || {};
-        const apiSettlements = json.settlements || [];
+        const apiOrder = (json.order || {}) as Record<string, unknown>;
+        const apiItems = (json.items || []) as Record<string, unknown>[];
+        const apiCustomer = (json.customer || {}) as Record<string, unknown>;
+        const apiSalesperson = (json.salesperson || {}) as Record<string, unknown>;
+        const apiSettlements = (json.settlements || []) as Record<string, unknown>[];
 
-        const totalPaid = apiSettlements.reduce((sum: number, s: any) => sum + Number(s.amount || 0), 0);
+        const totalPaid = apiSettlements.reduce((sum: number, s) => sum + Number(s.amount || 0), 0);
         const grandTotal = Number(apiOrder.grandTotal || 0);
         const balance = grandTotal - totalPaid;
 
         setOrder({
-          id: apiOrder.id,
-          customerId: apiOrder.customerId,
-          invoiceNumber: apiOrder.invoiceNumber,
+          id: Number(apiOrder.id) || 0,
+          customerId: apiOrder.customerId != null ? Number(apiOrder.customerId) : null,
+          invoiceNumber: apiOrder.invoiceNumber ? String(apiOrder.invoiceNumber) : null,
           status: apiOrder.status === 'confirmed' ? 'Confirmed' : apiOrder.status === 'delivered' ? 'Delivered' : apiOrder.status === 'cancelled' ? 'Cancelled' : 'Pending',
-          date: apiOrder.orderDate ? new Date(apiOrder.orderDate).toISOString().split('T')[0] : '',
-          customerName: apiCustomer.name || 'Unknown',
-          customerPhone: apiCustomer.phone || '-',
-          salesperson: apiSalesperson.name || 'Unknown',
-          beat: apiOrder.beat || '-',
-          creditDays: apiOrder.creditDays || 0,
-          dueDate: apiOrder.dueDate ? new Date(apiOrder.dueDate).toISOString().split('T')[0] : '',
-          items: apiItems.map((item: any) => ({
-            id: item.id,
-            name: item.productName,
-            erpId: item.erpId || '-',
-            qty: Number(item.quantity) || 0,
-            shortQty: Number(item.shortQuantity) || 0,
-            returnQty: Number(item.returnQuantity) || 0,
-            unitPrice: Number(item.unitPrice) || 0,
-            discount: Number(item.discount) || 0,
-            taxable: Number(item.taxableAmount) || 0,
-            gstRate: Number(item.gstRate) || 0,
-            gstAmt: Number(item.gstAmount) || 0,
-            total: Number(item.totalAmount) || 0,
-          })),
+          date: apiOrder.orderDate ? new Date(String(apiOrder.orderDate)).toISOString().split('T')[0] : '',
+          customerName: String(apiCustomer.name ?? 'Unknown'),
+          customerPhone: String(apiCustomer.phone ?? '-'),
+          salesperson: String(apiSalesperson.name ?? 'Unknown'),
+          beat: String(apiOrder.beat ?? '-'),
+          creditDays: Number(apiOrder.creditDays) || 0,
+          dueDate: apiOrder.dueDate ? new Date(String(apiOrder.dueDate)).toISOString().split('T')[0] : '',
+          items: apiItems.map((item) => {
+            const productRaw = item.product as Record<string, unknown> | null | undefined;
+            const productId = item.productId != null ? Number(item.productId) : null;
+            const product = productRaw && Number(productRaw.id)
+              ? {
+                  id: Number(productRaw.id),
+                  erpId: String(productRaw.erpId ?? ''),
+                  name: String(productRaw.name ?? ''),
+                  basePrice: Number(productRaw.basePrice) || 0,
+                  gstRate: Number(productRaw.gstRate) || 0,
+                  unit: String(productRaw.unit ?? 'PCS'),
+                }
+              : null;
+            const unitPrice = Number(item.unitPrice) || 0;
+            const gstRate = Number(item.gstRate) || 0;
+            return {
+              id: Number(item.id) || 0,
+              name: String(item.productName ?? ''),
+              erpId: String(item.erpId ?? '-'),
+              qty: Number(item.quantity) || 0,
+              shortQty: Number(item.shortQuantity) || 0,
+              returnQty: Number(item.returnQuantity) || 0,
+              unitPrice,
+              discount: Number(item.discount) || 0,
+              taxable: Number(item.taxableAmount) || 0,
+              gstRate,
+              gstAmt: Number(item.gstAmount) || 0,
+              total: Number(item.totalAmount) || 0,
+              productId,
+              product,
+              priceMismatch: product ? Math.abs(unitPrice - product.basePrice) > 0.01 : false,
+              gstMismatch: product && product.gstRate > 0 ? Math.abs(gstRate - product.gstRate) > 0.01 : false,
+            };
+          }),
           summary: {
             subtotal: Number(apiOrder.subtotal) || 0,
-            discount: apiItems.reduce((sum: number, item: any) => sum + Number(item.discount || 0), 0),
+            discount: apiItems.reduce((sum: number, item) => sum + Number(item.discount || 0), 0),
             taxable: Number(apiOrder.taxableAmount) || 0,
             cgst: Number(apiOrder.cgst) || 0,
             sgst: Number(apiOrder.sgst) || 0,
@@ -130,15 +215,15 @@ export default function OrderDetailPage() {
             paid: totalPaid,
             balance,
           },
-          payments: apiSettlements.map((s: any) => ({
-            id: s.id,
-            date: s.settledAt ? new Date(s.settledAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+          payments: apiSettlements.map((s) => ({
+            id: Number(s.id) || 0,
+            date: s.settledAt ? new Date(String(s.settledAt)).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
             amount: Number(s.amount) || 0,
             cash: Number(s.cashAmount) || 0,
             online: Number(s.onlineAmount) || 0,
-            mode: s.paymentMode || 'Cash',
-            reference: s.referenceNumber || '',
-            notes: s.notes || '',
+            mode: String(s.paymentMode ?? 'Cash'),
+            reference: String(s.referenceNumber ?? ''),
+            notes: String(s.notes ?? ''),
           })),
         });
         setPaymentAmount(balance > 0 ? Math.round(balance * 100) / 100 : 0);
@@ -166,7 +251,7 @@ export default function OrderDetailPage() {
       if (res.ok) {
         const updated = await res.json();
         const capitalized = updated.status === 'confirmed' ? 'Confirmed' : updated.status === 'delivered' ? 'Delivered' : updated.status === 'cancelled' ? 'Cancelled' : 'Pending';
-        setOrder({ ...order, status: capitalized });
+        if (order) setOrder({ ...order, status: capitalized });
       } else {
         const data = await res.json();
         alert(data.error || 'Failed to update status');
@@ -187,6 +272,8 @@ export default function OrderDetailPage() {
       alert('Cash Order Notes are required for Cash payments.');
       return;
     }
+
+    if (!order) return;
 
     // Validate denominations match cash amount for Cash mode
     if (paymentMode === 'Cash') {
@@ -216,7 +303,7 @@ export default function OrderDetailPage() {
 
       if (res.ok) {
         const newSettlement = await res.json();
-        const totalPaid = order.payments.reduce((sum: number, p: any) => sum + Number(p.amount || 0), 0) + Number(paymentAmount);
+        const totalPaid = order.payments.reduce((sum: number, p) => sum + Number(p.amount || 0), 0) + Number(paymentAmount);
         const grandTotal = Number(order.summary.grandTotal || 0);
         const balance = grandTotal - totalPaid;
 
@@ -227,7 +314,7 @@ export default function OrderDetailPage() {
             balance,
           },
           payments: [...order.payments, {
-            id: `pay${Date.now()}`,
+            id: Date.now(),
             date: new Date().toISOString().split('T')[0],
             amount: paymentAmount,
             cash: paymentMode === 'Cash' ? paymentAmount : (paymentMode === 'Split' ? cashAmount : 0),
@@ -358,12 +445,41 @@ export default function OrderDetailPage() {
               </tr>
             </thead>
             <tbody>
-              {order.items.map((item: any, i: number) => (
+              {order.items.map((item, i: number) => (
                 <tr key={i} className="border-b border-white/5 hover:bg-white/5">
                   <td className="px-4 py-3">{i + 1}</td>
                   <td className="px-4 py-3">
                     <div className="font-medium text-white">{item.name}</div>
                     <div className="text-xs text-gray-500">{item.erpId}</div>
+                    {item.product ? (
+                      <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                        <Link
+                          href={`/products?search=${encodeURIComponent(item.product.erpId || item.product.name)}`}
+                          className="inline-flex items-center gap-1 text-xs text-sky-400 hover:text-sky-300 hover:underline"
+                        >
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5-5 5M6 12h12" />
+                          </svg>
+                          {item.product.name} · {item.product.erpId || `#${item.product.id}`}
+                        </Link>
+                        {item.priceMismatch && (
+                          <span
+                            title={`Catalog base price ${item.product.basePrice.toFixed(2)} vs billed ${item.unitPrice.toFixed(2)}`}
+                            className="text-[11px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30"
+                          >
+                            price ₹{item.product.basePrice.toFixed(2)} cat.
+                          </span>
+                        )}
+                        {item.gstMismatch && (
+                          <span
+                            title={`Catalog GST ${item.product.gstRate}% vs billed ${item.gstRate}%`}
+                            className="text-[11px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30"
+                          >
+                            GST {item.product.gstRate}% cat.
+                          </span>
+                        )}
+                      </div>
+                    ) : null}
                   </td>
                   <td className="px-4 py-3 text-right font-medium">{item.qty}</td>
                   <td className="px-4 py-3 text-right">{formatCurrency(item.unitPrice)}</td>
@@ -433,11 +549,11 @@ export default function OrderDetailPage() {
          </div>
 
          {/* Cash Order Notes (Admin View) */}
-         {order.payments.some((p: any) => p.mode === 'Cash' && p.notes) && (
+         {order.payments.some((p) => p.mode === 'Cash' && p.notes) && (
            <div className="glass-card p-6 h-full flex flex-col">
              <h3 className="font-bold text-white mb-4">Cash Order Notes</h3>
              <div className="space-y-3 flex-1 overflow-y-auto">
-               {order.payments.filter((p: any) => p.mode === 'Cash' && p.notes).map((pay: any, i: number) => (
+               {order.payments.filter((p) => p.mode === 'Cash' && p.notes).map((pay, i: number) => (
                  <div key={i} className="bg-slate-800/50 p-3 rounded-xl border border-white/5">
                    <div className="flex justify-between items-center mb-2">
                      <span className="text-xs font-medium text-gray-400">{new Date(pay.date).toLocaleDateString('en-IN')}</span>
@@ -483,7 +599,7 @@ export default function OrderDetailPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {order.payments.map((pay: any, i: number) => (
+                    {order.payments.map((pay, i: number) => (
                       <tr key={i} className="border-b border-white/5 hover:bg-white/5">
                         <td className="px-3 py-3 whitespace-nowrap">{new Date(pay.date).toLocaleDateString('en-IN')}</td>
                         <td className="px-3 py-3">
@@ -495,7 +611,7 @@ export default function OrderDetailPage() {
                         <td className="px-3 py-3">
                           {pay.denominations && pay.denominations.length > 0 ? (
                             <div className="flex flex-wrap gap-1">
-                              {pay.denominations.filter((d: any) => d.quantity > 0).map((d: any) => (
+                              {pay.denominations.filter(d => d.quantity > 0).map(d => (
                                 <span key={d.denomination} className="px-1.5 py-0.5 bg-slate-700 text-slate-300 rounded text-xs">
                                   ₹{d.denomination}×{d.quantity}
                                 </span>

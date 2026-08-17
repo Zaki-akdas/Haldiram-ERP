@@ -3,12 +3,36 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/components/AuthProvider';
 
+interface ReportRow {
+  name?: string;
+  date?: string;
+  sales?: number;
+  spent?: number;
+  cash?: number;
+  online?: number;
+  cheque?: number;
+  total?: number;
+  paid?: number;
+  outstanding?: number;
+  count?: number;
+  orders?: number;
+  rate?: number;
+  collections?: number;
+  [key: string]: unknown;
+}
+
+interface ReportData {
+  summary?: Record<string, number>;
+  concentration?: number;
+  table: ReportRow[];
+}
+
 export default function ReportsPage() {
   const { user, authFetch } = useAuth();
   const [activeTab, setActiveTab] = useState('Sales');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
-  const [data, setData] = useState<any>(null);
+  const [data, setData] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(false);
 
   const tabs = ['Sales', 'Collections', 'Customers', 'Salespeople'];
@@ -155,28 +179,28 @@ export default function ReportsPage() {
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="glass-card p-5 border-l-4 border-l-blue-500">
                   <p className="text-sm text-gray-500 font-medium mb-1">Total Sales</p>
-                  <p className="text-2xl font-bold">₹{(data.summary.totalSales || 0).toLocaleString('en-IN')}</p>
+                  <p className="text-2xl font-bold">₹{(data.summary?.totalSales || 0).toLocaleString('en-IN')}</p>
                 </div>
                 <div className="glass-card p-5 border-l-4 border-l-green-500">
                   <p className="text-sm text-gray-500 font-medium mb-1">Total Orders</p>
-                  <p className="text-2xl font-bold">{data.summary.totalOrders || 0}</p>
+                  <p className="text-2xl font-bold">{data.summary?.totalOrders || 0}</p>
                 </div>
                 <div className="glass-card p-5 border-l-4 border-l-purple-500">
                   <p className="text-sm text-gray-500 font-medium mb-1">Avg Order Value</p>
-                  <p className="text-2xl font-bold">₹{(data.summary.avgOrder || 0).toLocaleString('en-IN')}</p>
+                  <p className="text-2xl font-bold">₹{(data.summary?.avgOrder || 0).toLocaleString('en-IN')}</p>
                 </div>
                 <div className="glass-card p-5 border-l-4 border-l-amber-500">
                   <p className="text-sm text-gray-500 font-medium mb-1">Highest Single Order</p>
-                  <p className="text-2xl font-bold">₹{(data.summary.highestOrder || 0).toLocaleString('en-IN')}</p>
+                  <p className="text-2xl font-bold">₹{(data.summary?.highestOrder || 0).toLocaleString('en-IN')}</p>
                 </div>
               </div>
 
               <div className="glass-card p-6 overflow-hidden">
                 <h3 className="text-lg font-bold mb-6">Sales Trend</h3>
                 <div className="h-[200px] flex items-end gap-2 md:gap-4 border-b border-gray-200 dark:border-gray-700 pb-2 relative">
-                  {data.table.map((item: any, i: number) => {
-                    const maxSales = Math.max(...data.table.map((d: any) => d.sales));
-                    const heightPercent = (item.sales / maxSales) * 100;
+                  {data.table.map((item, i: number) => {
+                    const maxSales = Math.max(0, ...data.table.map(d => Number(d.sales) || 0));
+                    const heightPercent = ((Number(item.sales) || 0) / (maxSales || 1)) * 100;
                     return (
                       <div key={i} className="flex-1 flex flex-col items-center justify-end group">
                         <div className="w-full bg-primary/80 hover:bg-primary rounded-t-sm transition-all duration-1000 ease-out relative" style={{ height: `${heightPercent}%` }}>
@@ -185,7 +209,7 @@ export default function ReportsPage() {
                           </div>
                         </div>
                         <div className="text-[10px] md:text-xs text-gray-500 mt-2 rotate-45 md:rotate-0 origin-left whitespace-nowrap">
-                          {new Date(item.date).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' })}
+                          {item.date ? new Date(item.date).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' }) : ''}
                         </div>
                       </div>
                     );
@@ -205,7 +229,7 @@ export default function ReportsPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                      {data.table.map((row: any, i: number) => (
+                      {data.table.map((row, i: number) => (
                         <tr key={i} className="hover:bg-gray-50/50 dark:hover:bg-gray-800/30 transition-colors">
                           <td className="p-4 text-sm">{row.date}</td>
                           <td className="p-4 text-sm text-right">{row.count}</td>
@@ -225,19 +249,19 @@ export default function ReportsPage() {
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="glass-card p-5 border-l-4 border-l-blue-500">
                   <p className="text-sm text-gray-500 font-medium mb-1">Total Collections</p>
-                  <p className="text-2xl font-bold">₹{(data.summary.total || 0).toLocaleString('en-IN')}</p>
+                  <p className="text-2xl font-bold">₹{(data.summary?.total || 0).toLocaleString('en-IN')}</p>
                 </div>
                 <div className="glass-card p-5 border-l-4 border-l-green-500">
                   <p className="text-sm text-gray-500 font-medium mb-1">Cash</p>
-                  <p className="text-2xl font-bold text-green-600">₹{(data.summary.cash || 0).toLocaleString('en-IN')}</p>
+                  <p className="text-2xl font-bold text-green-600">₹{(data.summary?.cash || 0).toLocaleString('en-IN')}</p>
                 </div>
                 <div className="glass-card p-5 border-l-4 border-l-purple-500">
                   <p className="text-sm text-gray-500 font-medium mb-1">Online</p>
-                  <p className="text-2xl font-bold text-purple-600">₹{(data.summary.online || 0).toLocaleString('en-IN')}</p>
+                  <p className="text-2xl font-bold text-purple-600">₹{(data.summary?.online || 0).toLocaleString('en-IN')}</p>
                 </div>
                 <div className="glass-card p-5 border-l-4 border-l-amber-500">
                   <p className="text-sm text-gray-500 font-medium mb-1">Cheque</p>
-                  <p className="text-2xl font-bold text-amber-600">₹{(data.summary.cheque || 0).toLocaleString('en-IN')}</p>
+                  <p className="text-2xl font-bold text-amber-600">₹{(data.summary?.cheque || 0).toLocaleString('en-IN')}</p>
                 </div>
               </div>
 
@@ -255,7 +279,7 @@ export default function ReportsPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                      {data.table.map((row: any, i: number) => (
+                      {data.table.map((row, i: number) => (
                         <tr key={i} className="hover:bg-gray-50/50 dark:hover:bg-gray-800/30 transition-colors">
                           <td className="p-4 text-sm">{row.date}</td>
                           <td className="p-4 text-sm text-right">{row.count}</td>
@@ -264,8 +288,8 @@ export default function ReportsPage() {
                           <td className="p-4 text-sm text-right font-bold">₹{(row.total || 0).toLocaleString('en-IN')}</td>
                           <td className="p-4">
                             <div className="h-2 w-full bg-gray-100 rounded-full flex overflow-hidden">
-                              <div className="bg-green-500 h-full" style={{ width: `${(row.cash / row.total) * 100}%` }}></div>
-                              <div className="bg-purple-500 h-full" style={{ width: `${(row.online / row.total) * 100}%` }}></div>
+                              <div className="bg-green-500 h-full" style={{ width: `${((row.cash || 0) / (row.total || 0)) * 100}%` }}></div>
+                              <div className="bg-purple-500 h-full" style={{ width: `${((row.online || 0) / (row.total || 0)) * 100}%` }}></div>
                             </div>
                           </td>
                         </tr>
@@ -297,7 +321,7 @@ export default function ReportsPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                      {data.table.sort((a: any, b: any) => b.spent - a.spent).map((row: any, i: number) => (
+                      {data.table.sort((a, b) => (Number(b.spent) || 0) - (Number(a.spent) || 0)).map((row, i: number) => (
                         <tr key={i} className="hover:bg-gray-50/50 dark:hover:bg-gray-800/30 transition-colors">
                           <td className="p-4 font-medium">{row.name}</td>
                           <td className="p-4 text-sm text-right">{row.orders}</td>
@@ -329,7 +353,7 @@ export default function ReportsPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                    {data.table.sort((a: any, b: any) => b.sales - a.sales).map((row: any, i: number) => (
+                    {data.table.sort((a, b) => (Number(b.sales) || 0) - (Number(a.sales) || 0)).map((row, i: number) => (
                       <tr key={i} className="hover:bg-gray-50/50 dark:hover:bg-gray-800/30 transition-colors">
                         <td className="p-4 font-medium">{row.name}</td>
                         <td className="p-4 text-sm text-right">{row.orders}</td>
@@ -337,11 +361,11 @@ export default function ReportsPage() {
                         <td className="p-4 text-sm font-medium text-right text-green-600">₹{(row.collections || 0).toLocaleString('en-IN')}</td>
                         <td className="p-4">
                           <div className="flex items-center gap-2">
-                            <span className="text-sm font-medium w-10">{row.rate}%</span>
+                            <span className="text-sm font-medium w-10">{(row.rate || 0)}%</span>
                             <div className="h-2 flex-1 bg-gray-100 rounded-full overflow-hidden">
                               <div 
-                                className={`h-full ${row.rate >= 90 ? 'bg-green-500' : row.rate >= 80 ? 'bg-amber-500' : 'bg-red-500'}`} 
-                                style={{ width: `${row.rate}%` }}
+                                className={`h-full ${(row.rate || 0) >= 90 ? 'bg-green-500' : (row.rate || 0) >= 80 ? 'bg-amber-500' : 'bg-red-500'}`} 
+                                style={{ width: `${row.rate || 0}%` }}
                               ></div>
                             </div>
                           </div>

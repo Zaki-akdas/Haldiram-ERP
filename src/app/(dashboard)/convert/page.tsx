@@ -10,7 +10,7 @@ export default function ConvertPage() {
   const [sourceFormat, setSourceFormat] = useState('');
   const [targetFormat, setTargetFormat] = useState('');
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<{ content: string; format: string } | null>(null);
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState('Preview');
   
@@ -100,9 +100,9 @@ export default function ConvertPage() {
         content: contentStr,
         format: data.format || targetFormat
       });
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
-      setError(err.message || 'Conversion failed. Please try again.');
+      setError(err instanceof Error ? err.message : 'Conversion failed. Please try again.');
     } finally {
       setLoading(false);
     }

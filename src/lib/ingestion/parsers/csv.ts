@@ -73,26 +73,40 @@ interface ColumnMapping {
 function mapColumns(headers: string[]): ColumnMapping {
   const mapping: ColumnMapping = {};
   const normalized = headers.map(h => normalizeHeader(h));
+  // A column may be claimed by exactly one role: without this guard a header
+  // like 'GST Rate %' matches the generic 'rate' price alias AND 'gst rate',
+  // so the GST-rate column would also be read as the unit price.
+  const used = new Set<number>();
+
+  const claim = (role: keyof ColumnMapping, aliases: string[], i: number, h: string, raw: string): void => {
+    if (used.has(i) || mapping[role] !== undefined) return;
+    if (matchAlias(h, aliases) || matchAlias(raw, aliases)) {
+      mapping[role] = i;
+      used.add(i);
+    }
+  };
 
   for (let i = 0; i < normalized.length; i++) {
     const h = normalized[i];
     const raw = headers[i].toLowerCase();
 
-    if (!mapping.srNo && (matchAlias(h, SR_NO_ALIASES) || matchAlias(raw, SR_NO_ALIASES))) mapping.srNo = i;
-    if (!mapping.erpId && (matchAlias(h, ERP_ID_ALIASES) || matchAlias(raw, ERP_ID_ALIASES))) mapping.erpId = i;
-    if (!mapping.productName && (matchAlias(h, PRODUCT_NAME_ALIASES) || matchAlias(raw, PRODUCT_NAME_ALIASES))) mapping.productName = i;
-    if (!mapping.hsnCode && (matchAlias(h, HSN_ALIASES) || matchAlias(raw, HSN_ALIASES))) mapping.hsnCode = i;
-    if (!mapping.mrp && (matchAlias(h, MRP_ALIASES) || matchAlias(raw, MRP_ALIASES))) mapping.mrp = i;
-    if (!mapping.unit && (matchAlias(h, UNIT_ALIASES) || matchAlias(raw, UNIT_ALIASES))) mapping.unit = i;
-    if (!mapping.cases && (matchAlias(h, CASES_ALIASES) || matchAlias(raw, CASES_ALIASES))) mapping.cases = i;
-    if (!mapping.quantity && (matchAlias(h, QTY_ALIASES) || matchAlias(raw, QTY_ALIASES))) mapping.quantity = i;
-    if (!mapping.ptr && (matchAlias(h, PTR_ALIASES) || matchAlias(raw, PTR_ALIASES))) mapping.ptr = i;
-    if (!mapping.pricePerStd && (matchAlias(h, PRICE_STD_ALIASES) || matchAlias(raw, PRICE_STD_ALIASES))) mapping.pricePerStd = i;
-    if (!mapping.discount && (matchAlias(h, DISCOUNT_ALIASES) || matchAlias(raw, DISCOUNT_ALIASES))) mapping.discount = i;
-    if (!mapping.taxableAmount && (matchAlias(h, TAXABLE_ALIASES) || matchAlias(raw, TAXABLE_ALIASES))) mapping.taxableAmount = i;
-    if (!mapping.gstRate && (matchAlias(h, GST_RATE_ALIASES) || matchAlias(raw, GST_RATE_ALIASES))) mapping.gstRate = i;
-    if (!mapping.gstAmount && (matchAlias(h, GST_AMT_ALIASES) || matchAlias(raw, GST_AMT_ALIASES))) mapping.gstAmount = i;
-    if (!mapping.totalAmount && (matchAlias(h, TOTAL_ALIASES) || matchAlias(raw, TOTAL_ALIASES))) mapping.totalAmount = i;
+    // Specific roles first; the generic 'rate'/'price' alias runs last so it
+    // can only claim columns no specific role wanted.
+    claim('srNo', SR_NO_ALIASES, i, h, raw);
+    claim('erpId', ERP_ID_ALIASES, i, h, raw);
+    claim('productName', PRODUCT_NAME_ALIASES, i, h, raw);
+    claim('hsnCode', HSN_ALIASES, i, h, raw);
+    claim('mrp', MRP_ALIASES, i, h, raw);
+    claim('unit', UNIT_ALIASES, i, h, raw);
+    claim('cases', CASES_ALIASES, i, h, raw);
+    claim('quantity', QTY_ALIASES, i, h, raw);
+    claim('ptr', PTR_ALIASES, i, h, raw);
+    claim('discount', DISCOUNT_ALIASES, i, h, raw);
+    claim('taxableAmount', TAXABLE_ALIASES, i, h, raw);
+    claim('gstRate', GST_RATE_ALIASES, i, h, raw);
+    claim('gstAmount', GST_AMT_ALIASES, i, h, raw);
+    claim('totalAmount', TOTAL_ALIASES, i, h, raw);
+    claim('pricePerStd', PRICE_STD_ALIASES, i, h, raw);
   }
 
   if (!mapping.productName) {
@@ -406,6 +420,8 @@ export function parseCSV(csvText: string, fileName: string): IngestResult {
       gstRate: gstRate,
       gstAmount: parseFloat(gstAmount.toFixed(2)),
       totalAmount: parseFloat(totalAmount.toFixed(2)),
+      ...(colMap.gstRate !== undefined ? { gstRateExplicit: true as const } : {}),
+      ...(colMap.unit !== undefined ? { unitExplicit: true as const } : {}),
     });
   }
 

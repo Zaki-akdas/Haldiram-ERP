@@ -1,16 +1,33 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/components/AuthProvider';
 import Link from 'next/link';
+import type { Customer, Product } from '@/db/schema';
+import type { IngestItem, IngestResult } from '@/lib/ingestion/types';
+import type { ExtractionResult } from '@/lib/ai-provider';
+
+interface AiExtractResponse {
+  extraction?: ExtractionResult;
+  validation?: unknown;
+  provider?: string;
+  // Loose fields used by the AI-mode review UI.
+  customerName?: string;
+  total?: number;
+}
+
+interface ExtractModeState {
+  extraction: IngestResult;
+  validation?: unknown;
+}
 
 export default function BillsPage() {
   const { authFetch } = useAuth();
   const [mode, setMode] = useState<'fast' | 'ai' | 'extract'>('fast');
-  const [customers, setCustomers] = useState<any[]>([]);
-  const [products, setProducts] = useState<any[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState('');
-  const [invoiceNumber, setInvoiceNumber] = useState(`FB-${Date.now()}`);
+  const [invoiceNumber, setInvoiceNumber] = useState(`FB-${new Date().getTime()}`);
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [rows, setRows] = useState<Array<{
     id: number | string;
@@ -26,42 +43,53 @@ export default function BillsPage() {
     gstAmount?: number;
     totalAmount?: number;
   }>>([{ id: 1, productId: '', quantity: 1, basePrice: 0, discount: 0 }]);
-  const [recentBills, setRecentBills] = useState<any[]>([]);
+  const [recentBills, setRecentBills] = useState<{ invoiceNumber: string; total: number; date: string }[]>([]);
   const [notification, setNotification] = useState('');
   
   // AI Mode states
   const [aiFile, setAiFile] = useState<File | null>(null);
-  const [aiResults, setAiResults] = useState<any | null>(null);
+  const [aiResults, setAiResults] = useState<AiExtractResponse | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
 
   // Extract Mode states
   const [extractText, setExtractText] = useState('');
   const [extractFile, setExtractFile] = useState<File | null>(null);
-  const [extractResults, setExtractResults] = useState<any | null>(null);
+  const [extractResults, setExtractResults] = useState<ExtractModeState | null>(null);
   const [extractLoading, setExtractLoading] = useState(false);
+
+  const fetchData = useCallback(async () => {
+    const [custRes, prodRes] = await Promise.all([
+      authFetch('/api/customers'),
+      authFetch('/api/products')
+    ]);
+    const custData = custRes.ok ? (await custRes.json()) as { customers?: Customer[] } | Customer[] : null;
+    const prodData = prodRes.ok ? (await prodRes.json()) as { products?: Product[] } | Product[] : null;
+    return {
+      customers: Array.isArray(custData) ? custData : (custData?.customers || []),
+      products: Array.isArray(prodData) ? prodData : (prodData?.products || []),
+    };
+  }, [authFetch]);
 
   const loadData = async () => {
     try {
-      const [custRes, prodRes] = await Promise.all([
-        authFetch('/api/customers'),
-        authFetch('/api/products')
-      ]);
-      if (custRes.ok) {
-        const custData = await custRes.json();
-        setCustomers(Array.isArray(custData) ? custData : (custData.customers || []));
-      }
-      if (prodRes.ok) {
-        const prodData = await prodRes.json();
-        setProducts(Array.isArray(prodData) ? prodData : (prodData.products || []));
-      }
+      const { customers: loadedCustomers, products: loadedProducts } = await fetchData();
+      setCustomers(loadedCustomers);
+      setProducts(loadedProducts);
     } catch (err) {
       console.error("Failed to load initial data", err);
     }
   };
 
   useEffect(() => {
-    loadData();
-  }, [authFetch]);
+    // Fetch on mount; state updates happen in .then callbacks so they are not
+    // synchronous within the effect body.
+    fetchData()
+      .then(({ customers: loadedCustomers, products: loadedProducts }) => {
+        setCustomers(loadedCustomers);
+        setProducts(loadedProducts);
+      })
+      .catch(err => console.error('Failed to load initial data', err));
+  }, [authFetch, fetchData]);
 
   const addRow = () => {
     setRows([...rows, { id: Date.now(), productId: '', quantity: 1, basePrice: 0, discount: 0 }]);
@@ -79,7 +107,7 @@ export default function BillsPage() {
         const updated = { ...r, [field]: value };
         if (field === 'productId') {
           const prodList = Array.isArray(products) ? products : [];
-          const product = prodList.find((p: any) => String(p.id) === String(value));
+          const product = prodList.find(p => String(p.id) === String(value));
           if (product) updated.basePrice = Number(product.basePrice || product.mrp || 0);
         }
         return updated;
@@ -108,7 +136,7 @@ export default function BillsPage() {
           orderDate: date,
           items: rows.map(r => ({
             productId: r.productId || null,
-            productName: (Array.isArray(products) ? products : []).find((p: any) => String(p.id) === String(r.productId))?.name || r.productName || 'Item',
+            productName: (Array.isArray(products) ? products : []).find(p => String(p.id) === String(r.productId))?.name || r.productName || 'Item',
             quantity: Number(r.quantity) || 1,
             unitPrice: Number(r.basePrice) || 0,
             discount: Number(r.discount) || 0,
@@ -224,9 +252,9 @@ export default function BillsPage() {
     if (!extractResults?.extraction?.items) return;
     const extractedItems = extractResults.extraction.items;
     const productList = Array.isArray(products) ? products : [];
-    const newRows = extractedItems.map((item: any) => {
+    const newRows = extractedItems.map((item: IngestItem) => {
       // Match the extracted line to a real product by ERP ID so productId is valid for order creation
-      const matchedProduct = productList.find((p: any) => p.erpId === item.erpId);
+      const matchedProduct = productList.find(p => p.erpId === item.erpId);
       return {
         id: Date.now() + Math.random(),
         productId: matchedProduct ? String(matchedProduct.id) : '',
@@ -253,18 +281,19 @@ export default function BillsPage() {
     setExtractLoading(true);
     try {
       const extracted = extractResults.extraction;
-      const subtotal = extracted.taxableAmount || extracted.subtotal || 0;
-      const totalGst = extracted.totalGst || 0;
-      const grandTotal = extracted.grandTotal || subtotal + totalGst;
+      const header = extracted.header || {};
+      const subtotal = header.taxableAmount || header.subtotal || 0;
+      const totalGst = header.totalGst || 0;
+      const grandTotal = header.grandTotal || subtotal + totalGst;
 
       const res = await authFetch('/api/orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           customerId: selectedCustomer || '1',
-          invoiceNumber: extracted.invoiceNumber || `FB-${Date.now()}`,
+          invoiceNumber: header.invoiceNumber || `FB-${new Date().getTime()}`,
           orderDate: date,
-          items: (extracted.items || []).map((item: any) => ({
+          items: (extracted.items || []).map((item: IngestItem) => ({
             productName: item.productName,
             quantity: item.quantity,
             unitPrice: item.unitPrice,
@@ -277,9 +306,9 @@ export default function BillsPage() {
           })),
           subtotal,
           taxableAmount: subtotal,
-          cgst: extracted.cgst || totalGst / 2,
-          sgst: extracted.sgst || totalGst / 2,
-          igst: extracted.igst || 0,
+          cgst: header.cgst || totalGst / 2,
+          sgst: header.sgst || totalGst / 2,
+          igst: header.igst || 0,
           totalGst,
           grandTotal,
           status: 'confirmed'
@@ -386,7 +415,7 @@ export default function BillsPage() {
                   <div className="col-span-2">Total</div>
                 </div>
 
-                {rows.map((row, idx) => (
+                {rows.map((row) => (
                   <div key={row.id} className="grid grid-cols-1 md:grid-cols-12 gap-2 items-center bg-gray-50 dark:bg-gray-800/50 p-4 md:p-0 rounded-lg md:bg-transparent">
                     <div className="md:col-span-4">
                       <label className="md:hidden block text-xs mb-1">Product</label>
@@ -600,7 +629,7 @@ export default function BillsPage() {
             <div className="glass-card p-6">
               <div className="flex justify-between items-center mb-4">
                 <h3 className="text-xl font-bold">Extracted Bill Data</h3>
-                <span className="text-sm text-gray-500">Format: {extractResults.extraction?.detectedFormat}</span>
+                <span className="text-sm text-gray-500">Format: {extractResults.extraction?.format}</span>
               </div>
 
               {extractResults.extraction?.items && extractResults.extraction.items.length > 0 && (
@@ -621,7 +650,7 @@ export default function BillsPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {extractResults.extraction.items.map((item: any, idx: number) => (
+                      {extractResults.extraction.items.map((item: IngestItem, idx: number) => (
                         <tr key={idx} className="border-b border-gray-100 dark:border-gray-800">
                           <td className="py-2 px-3">{item.srNo || idx + 1}</td>
                           <td className="py-2 px-3 font-mono text-xs">{item.erpId || '-'}</td>
@@ -639,10 +668,10 @@ export default function BillsPage() {
                     <tfoot>
                       <tr className="border-t-2 border-gray-300 dark:border-gray-600">
                         <td colSpan={6} className="py-2 px-3 text-right font-bold">Totals:</td>
-                        <td className="py-2 px-3 text-right font-bold">₹{(extractResults.extraction?.taxableAmount || 0).toFixed(2)}</td>
+                        <td className="py-2 px-3 text-right font-bold">₹{((extractResults.extraction?.header?.taxableAmount) || 0).toFixed(2)}</td>
                         <td colSpan={2}></td>
-                        <td className="py-2 px-3 text-right font-bold">₹{(extractResults.extraction?.totalGst || 0).toFixed(2)}</td>
-                        <td className="py-2 px-3 text-right font-bold">₹{(extractResults.extraction?.grandTotal || 0).toFixed(2)}</td>
+                        <td className="py-2 px-3 text-right font-bold">₹{((extractResults.extraction?.header?.totalGst) || 0).toFixed(2)}</td>
+                        <td className="py-2 px-3 text-right font-bold">₹{((extractResults.extraction?.header?.grandTotal) || 0).toFixed(2)}</td>
                       </tr>
                     </tfoot>
                   </table>

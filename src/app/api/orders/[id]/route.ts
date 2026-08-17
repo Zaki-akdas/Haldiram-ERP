@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { db } from '@/db';
-import { orders, orderItems, customers, users, activityLogs, settlements as settlementsTable } from '@/db/schema';
-import { eq, and, desc } from 'drizzle-orm';
+import { orders, orderItems, customers, users, activityLogs, settlements as settlementsTable, orderStatusEnum, products, type NewOrder } from '@/db/schema';
+
+type OrderStatus = (typeof orderStatusEnum.enumValues)[number];
+import { eq, and, desc, inArray } from 'drizzle-orm';
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -38,11 +40,24 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
     const items = await db.select().from(orderItems).where(eq(orderItems.orderId, orderId));
 
+    // Attach the linked catalog product (if any) to each item so the UI can
+    // link to the product record and flag price / GST mismatches.
+    const productIds = items.filter(i => i.productId != null).map(i => i.productId as number);
+    const productsById = new Map<number, typeof products.$inferSelect>();
+    if (productIds.length > 0) {
+      const rows = await db.select().from(products).where(inArray(products.id, productIds));
+      for (const row of rows) productsById.set(row.id, row);
+    }
+    const itemsWithProduct = items.map((item) => ({
+      ...item,
+      product: item.productId != null ? (productsById.get(item.productId) ?? null) : null,
+    }));
+
     const settlements = await db.select().from(settlementsTable)
       .where(eq(settlementsTable.orderId, orderId))
       .orderBy(desc(settlementsTable.settledAt));
 
-    return NextResponse.json({ order, customer, salesperson, items, settlements });
+    return NextResponse.json({ order, customer, salesperson, items: itemsWithProduct, settlements });
   } catch (error) {
     return NextResponse.json({ error: (error as Error).message }, { status: 500 });
   }
@@ -55,16 +70,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
     const { id } = await params;
     const orderId = Number(id);
-    const body = await req.json();
+    const body = await req.json() as { status?: string };
     const { status } = body;
 
-    const validStatuses = ['pending', 'confirmed', 'delivered', 'cancelled'];
-    if (status && !validStatuses.includes(status)) {
+    const validStatuses: OrderStatus[] = ['pending', 'confirmed', 'delivered', 'cancelled'];
+    if (status && !validStatuses.includes(status as OrderStatus)) {
       return NextResponse.json({ error: 'Invalid status value' }, { status: 400 });
     }
 
-    const updateData: any = { updatedAt: new Date() };
-    if (status) updateData.status = status;
+    const updateData: Partial<NewOrder> = { updatedAt: new Date() };
+    if (status) updateData.status = status as OrderStatus;
 
     const [updated] = await db.update(orders).set(updateData).where(eq(orders.id, orderId)).returning();
 

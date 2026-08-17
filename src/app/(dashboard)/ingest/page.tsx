@@ -1,7 +1,9 @@
 'use client';
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { useAuth } from '@/components/AuthProvider';
+import { matchItemsToCatalog, suggestCatalogProducts, enrichItemFromCatalog } from '@/lib/product-match';
 
 type DeploymentMode = 'cloud' | 'local';
 type AIProvider = 'gemini' | 'azure' | 'bazaarlink' | 'ollama';
@@ -11,23 +13,48 @@ interface IngestItem {
   erpId?: string;
   productName: string;
   hsnCode?: string;
-  quantity: number;
+  mrp?: number;
   unit?: string;
+  cases?: number;
+  quantity: number;
   unitPrice: number;
   discount?: number;
   taxableAmount: number;
   gstRate: number;
   gstAmount: number;
   totalAmount: number;
+  /** Catalog product the user linked manually. */
+  productId?: number | null;
+  /** True when the user (or the source bill) stated the GST rate explicitly. */
+  gstRateExplicit?: boolean;
+  /** True when the user (or the source bill) stated the unit explicitly. */
+  unitExplicit?: boolean;
+}
+
+interface CatalogProduct {
+  id: number;
+  erpId: string;
+  name: string;
+  hsnCode?: string;
+  gstRate: number;
+  unit: string;
 }
 
 interface IngestHeader {
   invoiceNumber?: string;
   invoiceDate?: string;
+  sellerName?: string;
+  sellerGSTIN?: string;
   customerName?: string;
   customerGSTIN?: string;
-  grandTotal?: number;
+  customerAddress?: string;
+  subtotal?: number;
+  taxableAmount?: number;
+  cgst?: number;
+  sgst?: number;
+  igst?: number;
   totalGst?: number;
+  grandTotal?: number;
 }
 
 interface IngestResult {
@@ -47,8 +74,80 @@ interface ValidationResult {
   isValid: boolean;
 }
 
+interface OrderHeaderFields {
+  invoiceNumber: string;
+  invoiceDate: string;
+  customerName: string;
+  customerGSTIN: string;
+  notes: string;
+  creditDays: number;
+}
+
+function CatalogLinkControl({
+  item,
+  catalog,
+  exactMatchId,
+  catalogLoading,
+  onLink,
+  onUnlink,
+}: {
+  item: IngestItem;
+  catalog: CatalogProduct[];
+  exactMatchId: number | null;
+  catalogLoading: boolean;
+  onLink: (product: CatalogProduct) => void;
+  onUnlink: () => void;
+}) {
+  const productById = useMemo(() => new Map(catalog.map((p) => [p.id, p])), [catalog]);
+  const linked = item.productId != null ? productById.get(item.productId) : undefined;
+  if (linked) {
+    return (
+      <div className="mt-1 flex items-center gap-1.5 text-xs">
+        <span className="text-sky-500">→ {linked.name} · {linked.erpId || `#${linked.id}`}</span>
+        <button
+          type="button"
+          onClick={onUnlink}
+          className="text-gray-400 hover:text-red-500 transition-colors"
+          title="Unlink product"
+        >✕</button>
+      </div>
+    );
+  }
+  const auto = exactMatchId != null ? productById.get(exactMatchId) : undefined;
+  if (auto) {
+    return (
+      <div className="mt-1 text-xs text-emerald-500">
+        auto-linked: {auto.name} · {auto.erpId || `#${auto.id}`}
+      </div>
+    );
+  }
+  const suggestions = suggestCatalogProducts(item, catalog, 5);
+  return (
+    <div className="mt-1">
+      <select
+        className="input-field w-full text-xs py-1"
+        value=""
+        disabled={catalogLoading}
+        onChange={(e) => {
+          const product = productById.get(Number(e.target.value));
+          if (product) onLink(product);
+        }}
+      >
+        <option value="">{catalogLoading ? 'Loading catalog…' : '— Link catalog product —'}</option>
+        {suggestions.map((p) => (
+          <option key={p.id} value={p.id}>{p.name} · {p.erpId || `#${p.id}`}</option>
+        ))}
+        {suggestions.length === 0 && !catalogLoading && (
+          <option value="" disabled>No matching products</option>
+        )}
+      </select>
+    </div>
+  );
+}
+
 export default function IngestPage() {
   const { authFetch } = useAuth();
+  const router = useRouter();
   const [mode, setMode] = useState<DeploymentMode>('cloud');
   const [preferredProvider, setPreferredProvider] = useState<AIProvider>('gemini');
   const [text, setText] = useState('');
@@ -60,7 +159,46 @@ export default function IngestPage() {
   const [notification, setNotification] = useState('');
   const [activeTab, setActiveTab] = useState<'upload' | 'paste'>('upload');
   const [editableItems, setEditableItems] = useState<IngestItem[]>([]);
+  const [headerFields, setHeaderFields] = useState<OrderHeaderFields>({
+    invoiceNumber: '',
+    invoiceDate: '',
+    customerName: '',
+    customerGSTIN: '',
+    notes: '',
+    creditDays: 0,
+  });
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [catalog, setCatalog] = useState<CatalogProduct[]>([]);
+  const [catalogLoading, setCatalogLoading] = useState(true);
+
+  // Load the product catalog once so the review table can suggest manual
+  // links for items the automatic matcher could not resolve.
+  useEffect(() => {
+    let mounted = true;
+    authFetch('/api/products?limit=1000')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!mounted) return;
+        const rows = ((data?.products || []) as Record<string, unknown>[]);
+        setCatalog(rows.map((p) => ({
+          id: Number(p.id),
+          erpId: String(p.erpId ?? ''),
+          name: String(p.name ?? ''),
+          hsnCode: p.hsnCode ? String(p.hsnCode) : undefined,
+          gstRate: Number(p.gstRate) || 0,
+          unit: String(p.unit || 'PCS'),
+        })));
+      })
+      .catch(() => { /* catalog is optional — the order still works without it */ })
+      .finally(() => { if (mounted) setCatalogLoading(false); });
+    return () => { mounted = false; };
+  }, [authFetch]);
+
+  // Server-equivalent automatic match (ERP ID, then name) per current row.
+  const exactMatchIds = useMemo(
+    () => (catalog.length > 0 ? matchItemsToCatalog(editableItems, catalog) : []),
+    [editableItems, catalog]
+  );
 
   const showNotification = (msg: string) => {
     setNotification(msg);
@@ -88,7 +226,7 @@ export default function IngestPage() {
     }
   }, []);
 
-  const processIngestion = async (createOrderNow = false) => {
+  const processIngestion = async () => {
     setLoading(true);
     setResult(null);
     setValidation(null);
@@ -120,7 +258,6 @@ export default function IngestPage() {
       formData.append('fileName', fileName);
       formData.append('deploymentMode', mode);
       formData.append('preferredProvider', preferredProvider);
-      formData.append('createOrder', createOrderNow ? 'true' : 'false');
 
       const res = await authFetch('/api/ingest', {
         method: 'POST',
@@ -132,10 +269,14 @@ export default function IngestPage() {
         setResult(data.result);
         setEditableItems(data.result.items);
         setValidation(data.validation);
-        if (data.orderId) {
-          setOrderId(data.orderId);
-          showNotification(`Order #${data.orderId} created successfully!`);
-        }
+        setHeaderFields({
+          invoiceNumber: data.result.header?.invoiceNumber || '',
+          invoiceDate: data.result.header?.invoiceDate || '',
+          customerName: data.result.header?.customerName || '',
+          customerGSTIN: data.result.header?.customerGSTIN || '',
+          notes: '',
+          creditDays: 0,
+        });
       } else {
         const err = await res.json();
         showNotification(err.error || 'Ingestion failed');
@@ -149,13 +290,107 @@ export default function IngestPage() {
   };
 
   const createOrderFromExtracted = async () => {
-    if (!result) return;
-    await processIngestion(true);
+    if (!result || editableItems.length === 0) return;
+    setLoading(true);
+    setNotification('');
+
+    try {
+      // Recompute header totals from the confirmed (edited) items so the order
+      // matches exactly what the user reviewed on screen.
+      const subtotal = editableItems.reduce((sum, i) => sum + (i.quantity || 0) * (i.unitPrice || 0), 0);
+      const taxableAmount = editableItems.reduce((sum, i) => sum + (i.taxableAmount || 0), 0);
+      const totalGst = editableItems.reduce((sum, i) => sum + (i.gstAmount || 0), 0);
+      const grandTotal = editableItems.reduce((sum, i) => sum + (i.totalAmount || 0), 0);
+
+      const review = {
+        ...result,
+        items: editableItems,
+        header: {
+          ...result.header,
+          invoiceNumber: headerFields.invoiceNumber || result.header?.invoiceNumber,
+          invoiceDate: headerFields.invoiceDate || result.header?.invoiceDate,
+          customerName: headerFields.customerName || result.header?.customerName,
+          customerGSTIN: headerFields.customerGSTIN || result.header?.customerGSTIN,
+          subtotal,
+          taxableAmount,
+          cgst: totalGst / 2,
+          sgst: totalGst / 2,
+          totalGst,
+          grandTotal,
+        },
+      };
+
+      const formData = new FormData();
+      formData.append('review', JSON.stringify(review));
+      formData.append('deploymentMode', mode);
+      formData.append('preferredProvider', preferredProvider);
+      formData.append('createOrder', 'true');
+      formData.append('orderData', JSON.stringify({
+        customerName: headerFields.customerName || undefined,
+        customerGSTIN: headerFields.customerGSTIN || undefined,
+        notes: headerFields.notes || undefined,
+        creditDays: Number(headerFields.creditDays) || 0,
+      }));
+
+      const res = await authFetch('/api/ingest', {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await res.json();
+
+      if (res.ok) {
+        if (data.orderId) {
+          setOrderId(data.orderId);
+          showNotification(`Order #${data.orderId} created from the bill`);
+          // Show the created order right away.
+          router.push(`/orders/${data.orderId}`);
+        } else {
+          showNotification(data.orderCreationSkipped || 'Order was not created');
+        }
+      } else {
+        showNotification(data.error || 'Order creation failed');
+      }
+    } catch (err) {
+      console.error(err);
+      showNotification('Order creation failed. Please try again.');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const updateItem = (index: number, field: keyof IngestItem, value: any) => {
+  const updateItem = <K extends keyof IngestItem>(index: number, field: K, value: IngestItem[K]) => {
     const updated = [...editableItems];
     updated[index] = { ...updated[index], [field]: value };
+    // A user-typed GST rate / unit is authoritative: catalog enrichment must
+    // not overwrite it when the order is created.
+    if (field === 'gstRate') updated[index].gstRateExplicit = true;
+    if (field === 'unit') updated[index].unitExplicit = true;
+    setEditableItems(updated);
+  };
+
+  const linkProduct = (index: number, product: CatalogProduct) => {
+    const updated = [...editableItems];
+    const item = { ...updated[index], productId: product.id };
+    // Apply the catalog's GST rate / unit now (when the bill didn't state
+    // them) so the row shows the exact values that will be stored.
+    const enriched = enrichItemFromCatalog(item, product);
+    if (!item.gstRateExplicit) {
+      item.gstRate = enriched.gstRate;
+      item.gstAmount = enriched.gstAmount;
+      item.totalAmount = enriched.totalAmount;
+      item.gstRateExplicit = true;
+    }
+    if (!item.unitExplicit) {
+      item.unit = enriched.unit;
+      item.unitExplicit = true;
+    }
+    updated[index] = item;
+    setEditableItems(updated);
+  };
+
+  const unlinkProduct = (index: number) => {
+    const updated = [...editableItems];
+    updated[index] = { ...updated[index], productId: null };
     setEditableItems(updated);
   };
 
@@ -168,6 +403,8 @@ export default function IngestPage() {
       gstRate: 5,
       gstAmount: 0,
       totalAmount: 0,
+      gstRateExplicit: true,
+      unitExplicit: true,
     }]);
   };
 
@@ -338,7 +575,7 @@ export default function IngestPage() {
             <div className="flex gap-4 mt-4">
               <button
                 className="btn-primary flex-1 py-3"
-                onClick={() => processIngestion(false)}
+                onClick={() => processIngestion()}
                 disabled={loading || (!file && !text.trim())}
               >
                 {loading ? 'Processing...' : 'Extract Data'}
@@ -410,6 +647,74 @@ export default function IngestPage() {
                 )}
               </div>
 
+              {/* Order Details (header) */}
+              <div className="glass-card p-6">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-xl font-bold">Order Details</h3>
+                  <span className="text-xs text-gray-500">These fields are saved with the order — correct them if the extraction missed something.</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <div className="space-y-1">
+                    <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider">Invoice Number</label>
+                    <input
+                      type="text"
+                      className="input-field w-full text-sm"
+                      value={headerFields.invoiceNumber}
+                      onChange={(e) => setHeaderFields({ ...headerFields, invoiceNumber: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider">Invoice Date</label>
+                    <input
+                      type="date"
+                      className="input-field w-full text-sm"
+                      value={headerFields.invoiceDate}
+                      onChange={(e) => setHeaderFields({ ...headerFields, invoiceDate: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider">Customer Name</label>
+                    <input
+                      type="text"
+                      className="input-field w-full text-sm"
+                      placeholder="Customer name"
+                      value={headerFields.customerName}
+                      onChange={(e) => setHeaderFields({ ...headerFields, customerName: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider">Customer GSTIN</label>
+                    <input
+                      type="text"
+                      className="input-field w-full text-sm"
+                      placeholder="Customer GSTIN"
+                      value={headerFields.customerGSTIN}
+                      onChange={(e) => setHeaderFields({ ...headerFields, customerGSTIN: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider">Credit Days</label>
+                    <input
+                      type="number"
+                      min={0}
+                      className="input-field w-full text-sm"
+                      value={headerFields.creditDays}
+                      onChange={(e) => setHeaderFields({ ...headerFields, creditDays: Number(e.target.value) || 0 })}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider">Notes</label>
+                    <input
+                      type="text"
+                      className="input-field w-full text-sm"
+                      placeholder="Optional notes"
+                      value={headerFields.notes}
+                      onChange={(e) => setHeaderFields({ ...headerFields, notes: e.target.value })}
+                    />
+                  </div>
+                </div>
+              </div>
+
               {/* Extracted Items */}
               <div className="glass-card p-6">
                 <div className="flex justify-between items-center mb-4">
@@ -428,6 +733,8 @@ export default function IngestPage() {
                       <thead>
                         <tr className="border-b border-gray-200 dark:border-gray-700">
                           <th className="text-left py-2 px-2">Product Name</th>
+                          <th className="text-left py-2 px-2">ERP ID</th>
+                          <th className="text-left py-2 px-2">HSN</th>
                           <th className="text-right py-2 px-2">Qty</th>
                           <th className="text-right py-2 px-2">Unit Price</th>
                           <th className="text-right py-2 px-2">Taxable</th>
@@ -446,6 +753,32 @@ export default function IngestPage() {
                                 className="input-field w-full text-sm"
                                 value={item.productName}
                                 onChange={(e) => updateItem(idx, 'productName', e.target.value)}
+                              />
+                              <CatalogLinkControl
+                                item={item}
+                                catalog={catalog}
+                                exactMatchId={exactMatchIds[idx] ?? null}
+                                catalogLoading={catalogLoading}
+                                onLink={(product) => linkProduct(idx, product)}
+                                onUnlink={() => unlinkProduct(idx)}
+                              />
+                            </td>
+                            <td className="py-2 px-2">
+                              <input
+                                type="text"
+                                className="input-field w-20 text-sm"
+                                placeholder="ERP ID"
+                                value={item.erpId || ''}
+                                onChange={(e) => updateItem(idx, 'erpId', e.target.value)}
+                              />
+                            </td>
+                            <td className="py-2 px-2">
+                              <input
+                                type="text"
+                                className="input-field w-20 text-sm"
+                                placeholder="HSN"
+                                value={item.hsnCode || ''}
+                                onChange={(e) => updateItem(idx, 'hsnCode', e.target.value)}
                               />
                             </td>
                             <td className="py-2 px-2">
@@ -496,7 +829,7 @@ export default function IngestPage() {
                       </tbody>
                       <tfoot>
                         <tr className="border-t-2 border-gray-300 dark:border-gray-600">
-                          <td colSpan={3} className="py-2 px-2 text-right font-bold">Totals:</td>
+                          <td colSpan={5} className="py-2 px-2 text-right font-bold">Totals:</td>
                           <td className="py-2 px-2 text-right font-bold">
                             ₹{editableItems.reduce((sum, i) => sum + (i.taxableAmount || 0), 0).toFixed(2)}
                           </td>
@@ -526,7 +859,7 @@ export default function IngestPage() {
                     <button
                       className="btn-primary flex-1 py-3"
                       onClick={createOrderFromExtracted}
-                      disabled={loading || !validation?.isValid}
+                      disabled={loading || editableItems.length === 0}
                     >
                       {loading ? 'Creating Order...' : 'Create Sales Order'}
                     </button>
@@ -537,16 +870,16 @@ export default function IngestPage() {
                         setValidation(null);
                         setOrderId(null);
                         setEditableItems([]);
+                        setHeaderFields({ invoiceNumber: '', invoiceDate: '', customerName: '', customerGSTIN: '', notes: '', creditDays: 0 });
                       }}
                     >
                       Clear
                     </button>
                   </div>
-                  {!validation?.isValid && (
-                    <p className="text-sm text-red-500 mt-2">
-                      Order creation requires a minimum validation score of 60% and at least one valid item.
-                    </p>
-                  )}
+                  <p className="text-xs text-gray-500 mt-3">
+                    The order is created from the reviewed items above (your edits are applied, not the raw parse).
+                    The server re-validates the data and explains below if it falls below the 60% threshold.
+                  </p>
                 </div>
               )}
             </>

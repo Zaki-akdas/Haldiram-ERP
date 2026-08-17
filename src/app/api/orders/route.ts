@@ -1,10 +1,53 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { db } from '@/db';
-import { orders, orderItems, customers, users, activityLogs, settlements } from '@/db/schema';
-import { eq, desc, and, count, gte, lte, like, or } from 'drizzle-orm';
+import { orders, orderItems, customers, users, activityLogs, settlements, orderStatusEnum, products, type NewOrder, type OrderItem } from '@/db/schema';
+import { eq, desc, and, count, gte, lte, like, or, sql, type SQL } from 'drizzle-orm';
+import { aggregateStockDeductions } from '@/lib/product-match';
 
-function parseSafeDate(val: any): Date | null {
+type OrderStatus = (typeof orderStatusEnum.enumValues)[number];
+
+interface OrderItemPayload {
+  productId?: number | string | null;
+  erpId?: string | null;
+  productName?: string;
+  quantity?: number | string;
+  unitPrice?: number | string;
+  discount?: number | string;
+  taxableAmount?: number | string;
+  gstRate?: number | string;
+  gstAmount?: number | string;
+  totalAmount?: number | string;
+  shortQuantity?: number | string;
+  returnQuantity?: number | string;
+}
+
+interface OrderPayload {
+  customerId?: number | string;
+  customerName?: string;
+  customerGSTIN?: string;
+  salespersonId?: number | string;
+  invoiceNumber?: string;
+  orderDate?: string | Date;
+  deliveryDate?: string | Date;
+  dueDate?: string | Date;
+  status?: OrderStatus | string;
+  items?: OrderItemPayload[];
+  beat?: string;
+  notes?: string;
+  creditDays?: number | string;
+  subtotal?: number | string;
+  taxableAmount?: number | string;
+  totalGst?: number | string;
+  cgst?: number | string;
+  sgst?: number | string;
+  igst?: number | string;
+  grandTotal?: number | string;
+  id?: number | string;
+  ids?: (number | string)[];
+}
+
+function parseSafeDate(val: unknown): Date | null {
   if (!val) return null;
   if (val instanceof Date && !isNaN(val.getTime())) return val;
   const str = String(val).trim();
@@ -13,12 +56,12 @@ function parseSafeDate(val: any): Date | null {
   return isNaN(parsed.getTime()) ? null : parsed;
 }
 
-function formatSafeNum(val: any): string {
+function formatSafeNum(val: unknown): string {
   const num = Number(val);
   return isNaN(num) ? '0.00' : num.toFixed(2);
 }
 
-function clampNum(val: any, maxVal = 9999999.99, decimals = 2): string {
+function clampNum(val: unknown, maxVal = 9999999.99, decimals = 2): string {
   const num = Number(val);
   if (isNaN(num)) return (0).toFixed(decimals);
   const clamped = Math.min(Math.max(0, num), maxVal);
@@ -41,13 +84,13 @@ export async function GET(req: NextRequest) {
     
     const offset = (page - 1) * limit;
 
-    const conditions = [];
+    const conditions: (SQL | undefined)[] = [];
 
     if (user.role === 'salesperson') {
       conditions.push(eq(orders.salespersonId, user.id));
     }
 
-    if (status) conditions.push(eq(orders.status, status as any));
+    if (status) conditions.push(eq(orders.status, status as OrderStatus));
     if (customerId) conditions.push(eq(orders.customerId, Number(customerId)));
     
     if (startDate) {
@@ -130,7 +173,7 @@ export async function POST(req: NextRequest) {
     const user = await getCurrentUser();
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const body = await req.json();
+    const body = await req.json() as OrderPayload;
     const { customerId, salespersonId, invoiceNumber, orderDate, deliveryDate, status, items, beat, notes, creditDays = 0, dueDate } = body;
 
     // 1. Resolve or Auto-create Customer to prevent Foreign Key Violation
@@ -182,7 +225,7 @@ export async function POST(req: NextRequest) {
     let totalTaxableAmountCalc = 0;
     let totalGstAmountCalc = 0;
 
-    const processedItems = (items || []).map((item: any) => {
+    const processedItems = (items || []).map((item: OrderItemPayload) => {
       const quantity = Number(item.quantity) || 1;
       const unitPrice = Number(item.unitPrice) || 0;
       const discount = Number(item.discount) || 0;
@@ -224,13 +267,13 @@ export async function POST(req: NextRequest) {
     const finalIgst = body.igst !== undefined ? Number(body.igst) : 0;
     const finalGrandTotal = body.grandTotal !== undefined ? Number(body.grandTotal) : (finalTaxable + finalTotalGst);
 
-    const orderValues: any = {
+    const orderValues: NewOrder = {
       customerId: targetCustomerId,
       salespersonId: actualSalespersonId,
       invoiceNumber: actualInvoiceNumber,
       orderDate: actualOrderDate,
       dueDate: actualDueDate,
-      status: status || 'pending',
+      status: (status as OrderStatus) || 'pending',
       subtotal: clampNum(finalSubtotal, 9999999.99, 2),
       taxableAmount: clampNum(finalTaxable, 9999999.99, 2),
       cgst: clampNum(finalCgst, 999999.99, 2),
@@ -251,45 +294,57 @@ export async function POST(req: NextRequest) {
       orderValues.beat = String(beat).trim();
     }
 
-    const [newOrder] = await db.insert(orders).values(orderValues).returning();
+    const insertedItems: OrderItem[] = [];
+    const newOrder = await db.transaction(async (tx) => {
+      const [created] = await tx.insert(orders).values(orderValues).returning();
 
-    const insertedItems: any[] = [];
-    if (processedItems.length > 0) {
-      for (const item of processedItems) {
-        const orderItem = {
-          orderId: newOrder.id,
-          productId: item.productId ? Number(item.productId) : null,
-          erpId: item.erpId || null,
-          productName: item.productName,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          discount: item.discount,
-          taxableAmount: item.taxableAmount,
-          gstRate: item.gstRate,
-          gstAmount: item.gstAmount,
-          totalAmount: item.totalAmount,
-          shortQuantity: item.shortQuantity ?? 0,
-          returnQuantity: item.returnQuantity ?? 0,
-          unit: 'PCS',
-        };
-        const [inserted] = await db.insert(orderItems).values(orderItem).returning();
-        insertedItems.push(inserted);
+      if (processedItems.length > 0) {
+        for (const item of processedItems) {
+          const orderItem = {
+            orderId: created.id,
+            productId: item.productId ? Number(item.productId) : null,
+            erpId: item.erpId || null,
+            productName: item.productName,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            discount: item.discount,
+            taxableAmount: item.taxableAmount,
+            gstRate: item.gstRate,
+            gstAmount: item.gstAmount,
+            totalAmount: item.totalAmount,
+            shortQuantity: item.shortQuantity ?? 0,
+            returnQuantity: item.returnQuantity ?? 0,
+            unit: 'PCS',
+          };
+          const [inserted] = await tx.insert(orderItems).values(orderItem).returning();
+          insertedItems.push(inserted);
+        }
       }
-    }
 
-    await db.insert(activityLogs).values({
-      userId: user.id,
-      activityType: 'order_created',
-      entityType: 'order',
-      entityId: newOrder.id,
-      description: `Order ${actualInvoiceNumber} created`
+      // Deduct catalog stock for items matched to a product record.
+      for (const deduction of aggregateStockDeductions(processedItems)) {
+        await tx.update(products).set({
+          stockQty: sql`${products.stockQty} - ${deduction.quantity}`,
+          updatedAt: new Date(),
+        }).where(eq(products.id, deduction.productId));
+      }
+
+      await tx.insert(activityLogs).values({
+        userId: user.id,
+        activityType: 'order_created',
+        entityType: 'order',
+        entityId: created.id,
+        description: `Order ${actualInvoiceNumber} created`
+      });
+
+      return created;
     });
 
     return NextResponse.json({ order: newOrder, items: insertedItems }, { status: 201 });
   } catch (error) {
     console.error('Order creation error:', error);
-    const err = error as any;
-    const causeMessage = err.cause?.message || err.cause?.toString() || '';
+    const err = error as Error & { cause?: { message?: string; toString?: () => string } };
+    const causeMessage = err.cause?.message || err.cause?.toString?.() || '';
     const baseMessage = err.message || 'Failed to create order';
     return NextResponse.json({ error: causeMessage ? `${baseMessage}: ${causeMessage}` : baseMessage }, { status: 500 });
   }

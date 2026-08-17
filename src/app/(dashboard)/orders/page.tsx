@@ -5,14 +5,34 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/components/AuthProvider';
 
+interface OrderDisplayRow {
+  id: number;
+  invoiceNumber: string | null;
+  customerId: number | null;
+  salespersonId: number | null;
+  orderDate: Date | string | null;
+  status: string;
+  grandTotal: string | null;
+  amountPaid: string | null;
+  balance: string | null;
+  customer?: { name: string } | null;
+  salesperson?: { name: string } | null;
+  // Loose display fallbacks tolerated from the API payload.
+  customerName?: string | null;
+  salespersonName?: string | null;
+  date?: string | null;
+  total?: string | number | null;
+  paid?: string | number | null;
+}
+
 export default function OrdersPage() {
   const router = useRouter();
   const { authFetch } = useAuth();
   
-  const [orders, setOrders] = useState<any[]>([]);
+  const [orders, setOrders] = useState<OrderDisplayRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<any[]>([]);
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
   
   // Filters
   const [status, setStatus] = useState('All');
@@ -33,7 +53,7 @@ export default function OrdersPage() {
       const res = await authFetch(`/api/orders?${queryParams.toString()}`);
       if (res.ok) {
         const json = await res.json();
-        setOrders(Array.isArray(json) ? json : (json.orders || []));
+        setOrders(Array.isArray(json) ? json as OrderDisplayRow[] : (json.orders || []) as OrderDisplayRow[]);
       } else {
         setOrders([]);
       }
@@ -59,7 +79,7 @@ export default function OrdersPage() {
     }
   };
 
-  const toggleSelectOne = (id: any) => {
+  const toggleSelectOne = (id: number) => {
     if (selectedIds.includes(id)) {
       setSelectedIds(selectedIds.filter(i => i !== id));
     } else {
@@ -67,7 +87,7 @@ export default function OrdersPage() {
     }
   };
 
-  const handleDeleteSingle = async (id: any, e: React.MouseEvent) => {
+  const handleDeleteSingle = async (id: number, e: React.MouseEvent) => {
     e.stopPropagation();
     if (!confirm('Are you sure you want to delete this order?')) return;
     try {
@@ -103,7 +123,7 @@ export default function OrdersPage() {
     }
   };
 
-  const formatCurrency = (amount: number) => {
+  const formatCurrency = (amount: number | string | null | undefined) => {
     return Number(amount || 0).toLocaleString('en-IN', { style: 'currency', currency: 'INR' });
   };
 
@@ -267,11 +287,11 @@ export default function OrdersPage() {
                     <td className="px-4 py-4 font-bold text-slate-900 dark:text-white">{order?.invoiceNumber || order?.id}</td>
 <td className="px-4 py-4 font-semibold text-slate-900 dark:text-white">{order.customerName || order.customer?.name || 'Customer'}</td>
                      <td className="px-4 py-4 text-slate-500 dark:text-slate-400 hidden md:table-cell">{order.salespersonName || order.salesperson?.name || 'Salesperson'}</td>
-                    <td className="px-4 py-4">{new Date(order.orderDate || order.date || Date.now()).toLocaleDateString('en-IN')}</td>
+                    <td className="px-4 py-4">{new Date(order.orderDate || order.date || new Date().getTime()).toLocaleDateString('en-IN')}</td>
                     <td className="px-4 py-4">{getStatusBadge(order.status)}</td>
                     <td className="px-4 py-4 text-right font-black text-slate-900 dark:text-white">{formatCurrency(order.grandTotal || order.total)}</td>
                     <td className="px-4 py-4 text-right font-bold text-emerald-600 dark:text-emerald-400 hidden lg:table-cell">{formatCurrency(order.amountPaid || order.paid)}</td>
-                    <td className={`px-4 py-4 text-right font-black ${(order.balance || 0) > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-slate-400'}`}>
+                    <td className={`px-4 py-4 text-right font-black ${(Number(order.balance) || 0) > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-slate-400'}`}>
                       {formatCurrency(order.balance)}
                     </td>
                     <td className="px-4 py-4 text-center" onClick={(e) => e.stopPropagation()}>

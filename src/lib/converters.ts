@@ -1,13 +1,23 @@
 import zlib from 'zlib';
+import PDFParser from 'pdf2json';
+import * as XLSX from 'xlsx';
+
+interface PDFParseModule {
+  PDFParse?: new (opts: { data: Buffer }) => {
+    load(): Promise<void>;
+    getText(): Promise<{ text: string }>;
+  };
+  default?: (buffer: Buffer) => Promise<{ text: string }>;
+  (buffer: Buffer): Promise<{ text: string }>;
+}
 
 export async function convertPDFToText(buffer: Buffer): Promise<string> {
   let text = '';
 
   // Stage 1: Try pdf2json
   try {
-    const PDFParser = require('pdf2json');
     text = await new Promise<string>((resolve) => {
-      const pdfParser = new PDFParser(null, 1); // text mode
+      const pdfParser = new PDFParser(null, true); // verbose mode
       pdfParser.on("pdfParser_dataError", () => resolve(''));
       pdfParser.on("pdfParser_dataReady", () => {
         try {
@@ -26,7 +36,7 @@ export async function convertPDFToText(buffer: Buffer): Promise<string> {
   // Stage 2: Try pdf-parse if stage 1 was empty
   if (!text || text.trim().length === 0) {
     try {
-      const pdfModule = (await import('pdf-parse')) as any;
+      const pdfModule = (await import('pdf-parse')) as unknown as PDFParseModule;
       if (pdfModule.PDFParse) {
         const parser = new pdfModule.PDFParse({ data: buffer });
         await parser.load();
@@ -156,7 +166,6 @@ function sanitizeExtractedText(text: string): string {
 }
 
 export function convertExcelToCSV(buffer: Buffer): string {
-  const XLSX = require('xlsx');
   const workbook = XLSX.read(buffer, { type: 'buffer' });
   const firstSheet = workbook.SheetNames[0];
   return XLSX.utils.sheet_to_csv(workbook.Sheets[firstSheet]);

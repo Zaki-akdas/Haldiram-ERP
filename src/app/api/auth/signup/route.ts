@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getCurrentUser } from '@/lib/auth';
+import { getCurrentUser, AUTH_DB_PASSWORD_PLACEHOLDER } from '@/lib/auth';
 import { db } from '@/db';
 import { users } from '@/db/schema';
 import { createAdminClient } from '@/lib/supabase';
@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
 
     const insertedUsers = await db.insert(users).values({
       email,
-      password: 'supabase_managed',
+      password: AUTH_DB_PASSWORD_PLACEHOLDER,
       name,
       role: userRole,
       phone: phone || null,

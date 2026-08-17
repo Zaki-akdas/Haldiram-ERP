@@ -139,9 +139,9 @@ FD0180003\tBoondi MRP 10\t21069099\t10.00\t432\t8.1400\t3317.41\t5\t3483.29`;
         if (!res.ok) throw new Error(data.error || 'File extraction failed');
         setResult(data.result);
       }
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
-      setError(err.message || 'Extraction failed. Please check format.');
+      setError(err instanceof Error ? err.message : 'Extraction failed. Please check format.');
     } finally {
       setProcessing(false);
     }
@@ -222,9 +222,9 @@ FD0180003\tBoondi MRP 10\t21069099\t10.00\t432\t8.1400\t3317.41\t5\t3483.29`;
         const data = await res.json();
         throw new Error(data.error || 'Failed to create order');
       }
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
-      setError(err.message || 'Failed to import as sales order');
+      setError(err instanceof Error ? err.message : 'Failed to import as sales order');
     } finally {
       setImporting(false);
     }
@@ -500,7 +500,7 @@ FD0180003\tBoondi MRP 10\t21069099\t10.00\t432\t8.1400\t3317.41\t5\t3483.29`;
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-800">
-                  {result.items?.map((item: any, i: number) => (
+                  {result.items?.map((item, i: number) => (
                     <tr key={i} className="hover:bg-slate-800/40 transition-colors">
                       <td className="px-4 py-2.5 font-medium text-gray-400">{item.srNo || i + 1}</td>
                       <td className="px-4 py-2.5 font-mono text-xs text-indigo-300">{item.erpId || '-'}</td>

@@ -7,6 +7,7 @@ import { convertPDFToText } from '@/lib/converters';
 import { getCurrentUser } from '@/lib/auth';
 import { db } from '@/db';
 import { invoices, activityLogs } from '@/db/schema';
+import type { ExtractionResult } from '@/lib/ai-provider';
 
 export async function POST(request: Request) {
   try {
@@ -31,9 +32,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Unsupported file type' }, { status: 400 });
     }
 
-    let extraction;
+    let extraction: ExtractionResult;
     if (mode === 'fast') {
-      extraction = extractWithRegex(text);
+      extraction = extractWithRegex(text) as ExtractionResult;
     } else {
       const provider = getDefaultProvider();
       if (!provider) {
@@ -48,10 +49,10 @@ export async function POST(request: Request) {
       fileName: file.name,
       fileType: file.type,
       fileSize: file.size,
-      extractedData: extraction as any,
+      extractedData: extraction,
       status: 'processed',
       uploadedById: user?.id ?? null,
-      validationResult: validation as any,
+      validationResult: validation,
     }).returning();
 
     if (user) {

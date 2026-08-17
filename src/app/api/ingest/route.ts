@@ -1,13 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { db } from '@/db';
-import { orders, orderItems, customers, users, activityLogs } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import { orders, orderItems, customers, users, activityLogs, orderStatusEnum, products, type NewOrder } from '@/db/schema';
+
+type OrderStatus = (typeof orderStatusEnum.enumValues)[number];
+import { eq, sql } from 'drizzle-orm';
 import { ingestData } from '@/lib/ingestion/engine';
 import { validateIngestionResult } from '@/lib/ingestion/validator';
-import { IngestRequest } from '@/lib/ingestion/types';
+import { IngestRequest, IngestResult } from '@/lib/ingestion/types';
+import { matchItemsToCatalog, enrichItemFromCatalog, aggregateStockDeductions } from '@/lib/product-match';
 
-function parseSafeDate(val: any): Date | null {
+function parseSafeDate(val: unknown): Date | null {
   if (!val) return null;
   if (val instanceof Date && !isNaN(val.getTime())) return val;
   const str = String(val).trim();
@@ -16,12 +19,12 @@ function parseSafeDate(val: any): Date | null {
   return isNaN(parsed.getTime()) ? null : parsed;
 }
 
-function formatSafeNum(val: any): string {
+function formatSafeNum(val: unknown): string {
   const num = Number(val);
   return isNaN(num) ? '0.00' : num.toFixed(2);
 }
 
-function clampNum(val: any, maxVal = 9999999.99, decimals = 2): string {
+function clampNum(val: unknown, maxVal = 9999999.99, decimals = 2): string {
   const num = Number(val);
   if (isNaN(num)) return (0).toFixed(decimals);
   const clamped = Math.min(Math.max(0, num), maxVal);
@@ -40,6 +43,13 @@ export async function POST(req: NextRequest) {
     let preferredProvider: IngestRequest['preferredProvider'];
     let createOrder = false;
     let orderData: IngestRequest['orderData'];
+    // Structured result from a parsed PDF/Excel file upload, used when the
+    // request carries no client-reviewed extraction.
+    let fileParseResult: IngestResult | undefined;
+    // Optional client-reviewed extraction (the user may have edited items and
+    // header fields after the initial parse). When present, it is used as the
+    // source of truth instead of re-parsing the raw input.
+    let review: Partial<IngestResult> | undefined;
 
     if (contentType.includes('application/json')) {
       const json = await req.json();
@@ -49,6 +59,7 @@ export async function POST(req: NextRequest) {
       preferredProvider = json.preferredProvider;
       createOrder = json.createOrder || false;
       orderData = json.orderData;
+      review = json.review;
     } else if (contentType.includes('multipart/form-data')) {
       const formData = await req.formData();
       const file = formData.get('file') as File | null;
@@ -65,22 +76,10 @@ export async function POST(req: NextRequest) {
         
         if (ext === 'pdf') {
           const { parsePDF } = await import('@/lib/ingestion/parsers/pdf');
-          const pdfResult = await parsePDF(buffer);
-          const validation = validateIngestionResult(pdfResult);
-          return NextResponse.json({
-            success: true,
-            result: pdfResult,
-            validation,
-          });
+          fileParseResult = await parsePDF(buffer);
         } else if (['xlsx', 'xls', 'excel'].includes(ext)) {
           const { parseExcel } = await import('@/lib/ingestion/parsers/excel');
-          const excelResult = await parseExcel(buffer, fileName);
-          const validation = validateIngestionResult(excelResult);
-          return NextResponse.json({
-            success: true,
-            result: excelResult,
-            validation,
-          });
+          fileParseResult = await parseExcel(buffer, fileName);
         } else {
           textToParse = buffer.toString('utf-8');
         }
@@ -98,35 +97,73 @@ export async function POST(req: NextRequest) {
           orderData = {};
         }
       }
+      const reviewStr = formData.get('review') as string;
+      if (reviewStr) {
+        try {
+          review = JSON.parse(reviewStr);
+        } catch {
+          review = undefined;
+        }
+      }
     } else {
       textToParse = await req.text();
     }
 
-    if (!textToParse) {
-      return NextResponse.json({ error: 'No content provided for ingestion' }, { status: 400 });
-    }
+    let ingestResponse: { success: boolean; result: IngestResult; error?: string };
 
-    const ingestRequest: IngestRequest = {
-      text: textToParse,
-      fileName,
-      deploymentMode,
-      preferredProvider,
-      createOrder,
-      orderData,
-    };
+    if (review && Array.isArray(review.items) && review.items.length > 0) {
+      // Client-reviewed extraction (edits applied in the review UI) — use it
+      // as-is so the order matches exactly what the user confirmed, without
+      // re-parsing (or re-invoking billable AI providers) on the raw input.
+      ingestResponse = {
+        success: true,
+        result: {
+          format: review.format || 'text',
+          header: review.header || {},
+          items: review.items as IngestResult['items'],
+          confidence: Number(review.confidence) || 0,
+          warnings: Array.isArray(review.warnings) ? review.warnings : [],
+          provider: typeof review.provider === 'string' ? review.provider : 'manual-review',
+          processingTimeMs: 0,
+        },
+      };
+    } else if (fileParseResult) {
+      // Direct PDF/Excel upload: the parsed result flows into the shared
+      // validation and (optionally) order-creation path below.
+      ingestResponse = { success: true, result: fileParseResult };
+    } else {
+      if (!textToParse) {
+        return NextResponse.json({ error: 'No content provided for ingestion' }, { status: 400 });
+      }
 
-    const ingestResponse = await ingestData(ingestRequest);
+      const ingestRequest: IngestRequest = {
+        text: textToParse,
+        fileName,
+        deploymentMode,
+        preferredProvider,
+        createOrder,
+        orderData,
+      };
 
-    if (!ingestResponse.success) {
-      return NextResponse.json({ error: ingestResponse.error || 'Ingestion failed' }, { status: 400 });
+      ingestResponse = await ingestData(ingestRequest);
+
+      if (!ingestResponse.success) {
+        return NextResponse.json({ error: ingestResponse.error || 'Ingestion failed' }, { status: 400 });
+      }
     }
 
     const validation = validateIngestionResult(ingestResponse.result);
 
-    // Create order if requested and extraction is valid
+    // Create order if requested and the (possibly reviewed) extraction is valid
     let orderId: number | undefined;
-    if (createOrder && validation.isValid && ingestResponse.result.items.length > 0) {
-      try {
+    let orderCreationSkipped: string | undefined;
+    if (createOrder) {
+      if (ingestResponse.result.items.length === 0) {
+        orderCreationSkipped = 'No line items to create an order from.';
+      } else if (!validation.isValid) {
+        orderCreationSkipped = `Validation score ${validation.score}/100 is below the 60% threshold required to create an order.`;
+      } else {
+        try {
         const result = ingestResponse.result;
         const body = orderData || {};
 
@@ -139,18 +176,54 @@ export async function POST(req: NextRequest) {
         }
 
         if (!customerExists) {
-          const anyCust = await db.select({ id: customers.id }).from(customers).limit(1);
-          if (anyCust.length > 0) {
-            targetCustomerId = anyCust[0].id;
-          } else {
-            const [newCust] = await db.insert(customers).values({
-              name: body.customerName || result.header.customerName || 'PRO SWAMI (SHARNAM ENTERPRISES)',
-              gstin: body.customerGSTIN || result.header.customerGSTIN || '23AMFPV5397L1ZB',
-              city: 'Bhopal',
-              state: 'Madhya Pradesh',
-              creditLimit: '500000.00'
-            }).returning();
-            targetCustomerId = newCust.id;
+          // Resolve the bill's customer: match by GSTIN, then by name, then
+          // create it from the bill. Only fall back to an arbitrary customer
+          // when the bill carries no customer details at all, so an order is
+          // never silently attached to the wrong account.
+          const billGstin = (body.customerGSTIN || result.header.customerGSTIN || '').trim();
+          const billName = (body.customerName || result.header.customerName || '').trim();
+
+          if (billGstin) {
+            const byGstin = await db.select({ id: customers.id }).from(customers).where(eq(customers.gstin, billGstin)).limit(1);
+            if (byGstin.length > 0) {
+              targetCustomerId = byGstin[0].id;
+              customerExists = true;
+            }
+          }
+
+          if (!customerExists && billName) {
+            const byName = await db.select({ id: customers.id }).from(customers).where(eq(customers.name, billName)).limit(1);
+            if (byName.length > 0) {
+              targetCustomerId = byName[0].id;
+              customerExists = true;
+            }
+          }
+
+          if (!customerExists) {
+            if (billName || billGstin) {
+              const [newCust] = await db.insert(customers).values({
+                name: billName || 'Unknown Customer',
+                gstin: billGstin || null,
+                city: 'Bhopal',
+                state: 'Madhya Pradesh',
+                creditLimit: '500000.00'
+              }).returning();
+              targetCustomerId = newCust.id;
+            } else {
+              const anyCust = await db.select({ id: customers.id }).from(customers).limit(1);
+              if (anyCust.length > 0) {
+                targetCustomerId = anyCust[0].id;
+              } else {
+                const [newCust] = await db.insert(customers).values({
+                  name: 'PRO SWAMI (SHARNAM ENTERPRISES)',
+                  gstin: '23AMFPV5397L1ZB',
+                  city: 'Bhopal',
+                  state: 'Madhya Pradesh',
+                  creditLimit: '500000.00'
+                }).returning();
+                targetCustomerId = newCust.id;
+              }
+            }
           }
         }
 
@@ -173,36 +246,57 @@ export async function POST(req: NextRequest) {
         let subtotalCalc = 0;
         let totalTaxableAmountCalc = 0;
         let totalGstAmountCalc = 0;
+        let matchedProductCount = 0;
 
-        const processedItems = result.items.map((item) => {
+        // Load the product catalog once so extracted line items link to real
+        // product records when the bill references them (ERP ID, then name),
+        // and so assumed GST rates / units can be filled from the catalog.
+        const catalogProducts = await db.select({
+          id: products.id,
+          erpId: products.erpId,
+          name: products.name,
+          gstRate: products.gstRate,
+          unit: products.unit,
+        }).from(products);
+        const matchedProductIds = matchItemsToCatalog(result.items, catalogProducts);
+        const productById = new Map(catalogProducts.map((p) => [p.id, p]));
+
+        const processedItems = result.items.map((item, index) => {
           const quantity = Math.round(item.quantity || 1);
           const unitPrice = Number(item.unitPrice) || 0;
           const discount = Number(item.discount) || 0;
-          let gstRate = Number(item.gstRate) || 5;
-          if (gstRate > 28 || gstRate < 0) gstRate = 5;
+
+          // A product the user linked manually in the review UI wins; fall back
+          // to the automatic ERP ID / name match when absent or stale.
+          let productId = item.productId != null ? Number(item.productId) : null;
+          if (productId !== null && !productById.has(productId)) productId = null;
+          if (productId === null) productId = matchedProductIds[index] ?? null;
+          if (productId !== null) matchedProductCount += 1;
 
           const taxableAmount = item.taxableAmount || ((quantity * unitPrice) - discount);
-          const gstAmount = item.gstAmount || (taxableAmount * (gstRate / 100));
-          const totalAmount = item.totalAmount || (taxableAmount + gstAmount);
+          const enriched = enrichItemFromCatalog(
+            { ...item, taxableAmount },
+            productId !== null ? productById.get(productId) : undefined
+          );
 
           subtotalCalc += (quantity * unitPrice);
           totalTaxableAmountCalc += taxableAmount;
-          totalGstAmountCalc += gstAmount;
+          totalGstAmountCalc += enriched.gstAmount;
 
           return {
-            productId: null,
+            productId,
             erpId: item.erpId || null,
             productName: item.productName || 'Item',
             quantity,
             unitPrice: clampNum(unitPrice, 999999.99, 2),
             discount: clampNum(discount, 99999.99, 2),
             taxableAmount: clampNum(taxableAmount, 9999999.99, 2),
-            gstRate: clampNum(gstRate, 28.00, 2),
-            gstAmount: clampNum(gstAmount, 999999.99, 2),
-            totalAmount: clampNum(totalAmount, 9999999.99, 2),
+            gstRate: clampNum(enriched.gstRate, 28.00, 2),
+            gstAmount: clampNum(enriched.gstAmount, 999999.99, 2),
+            totalAmount: clampNum(enriched.totalAmount, 9999999.99, 2),
             shortQuantity: 0,
             returnQuantity: 0,
-            unit: 'PCS',
+            unit: enriched.unit,
           };
         });
 
@@ -211,13 +305,13 @@ export async function POST(req: NextRequest) {
         const finalTotalGst = totalGstAmountCalc;
         const finalGrandTotal = finalTaxable + finalTotalGst;
 
-        const orderValues: any = {
+        const orderValues: NewOrder = {
           customerId: targetCustomerId,
           salespersonId: actualSalespersonId,
           invoiceNumber: actualInvoiceNumber,
           orderDate: actualOrderDate,
           dueDate: actualDueDate,
-          status: body.status || 'pending',
+          status: (body.status as OrderStatus) || 'pending',
           subtotal: clampNum(finalSubtotal, 9999999.99, 2),
           taxableAmount: clampNum(finalTaxable, 9999999.99, 2),
           cgst: clampNum(finalTotalGst / 2, 999999.99, 2),
@@ -228,36 +322,51 @@ export async function POST(req: NextRequest) {
           amountPaid: '0.00',
           balance: clampNum(finalGrandTotal, 9999999.99, 2),
           settlementStatus: 'pending',
+          creditDays: Number(creditDays) || 0,
           notes: body.notes || null,
           metadata: {
             ingestionFormat: result.format,
             ingestionProvider: result.provider,
             ingestionConfidence: result.confidence,
             ingestionWarnings: result.warnings,
+            matchedProducts: matchedProductCount,
           },
         };
 
-        const [newOrder] = await db.insert(orders).values(orderValues).returning();
+        const newOrder = await db.transaction(async (tx) => {
+          const [created] = await tx.insert(orders).values(orderValues).returning();
 
-        for (const item of processedItems) {
-          await db.insert(orderItems).values({
-            orderId: newOrder.id,
-            ...item,
+          for (const item of processedItems) {
+            await tx.insert(orderItems).values({
+              orderId: created.id,
+              ...item,
+            });
+          }
+
+          // Deduct catalog stock for items matched to a product record.
+          for (const deduction of aggregateStockDeductions(processedItems)) {
+            await tx.update(products).set({
+              stockQty: sql`${products.stockQty} - ${deduction.quantity}`,
+              updatedAt: new Date(),
+            }).where(eq(products.id, deduction.productId));
+          }
+
+          await tx.insert(activityLogs).values({
+            userId: user.id,
+            activityType: 'order_created',
+            entityType: 'order',
+            entityId: created.id,
+            description: `Order ${actualInvoiceNumber} created via AI ingestion`,
           });
-        }
 
-        await db.insert(activityLogs).values({
-          userId: user.id,
-          activityType: 'order_created',
-          entityType: 'order',
-          entityId: newOrder.id,
-          description: `Order ${actualInvoiceNumber} created via AI ingestion`,
+          return created;
         });
 
         orderId = newOrder.id;
-      } catch (orderError) {
-        console.error('Order creation after ingestion failed:', orderError);
-        // Don't fail the whole request, just report the ingestion result
+        } catch (orderError) {
+          console.error('Order creation after ingestion failed:', orderError);
+          orderCreationSkipped = 'Order creation failed on the server — check the logs.';
+        }
       }
     }
 
@@ -266,6 +375,7 @@ export async function POST(req: NextRequest) {
       result: ingestResponse.result,
       validation,
       orderId,
+      orderCreationSkipped,
     });
 
   } catch (error) {

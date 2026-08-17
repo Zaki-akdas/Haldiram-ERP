@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/components/AuthProvider';
 
 interface Settlement {
@@ -31,23 +31,26 @@ export default function SettlementsPage() {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
+  const fetchSettlementsData = useCallback(async () => {
+    const queryParams = new URLSearchParams();
+    if (search) queryParams.append('search', search);
+    if (modeFilter !== 'All') queryParams.append('mode', modeFilter);
+    if (startDate) queryParams.append('startDate', startDate);
+    if (endDate) queryParams.append('endDate', endDate);
+
+    const res = await authFetch(`/api/settlements?${queryParams.toString()}`);
+    if (res.ok) {
+      const data = await res.json();
+      return Array.isArray(data) ? data as Settlement[] : (data.settlements || []) as Settlement[];
+    }
+    return [] as Settlement[];
+  }, [authFetch, search, modeFilter, startDate, endDate]);
+
   const fetchSettlements = async (isManualRefresh = false) => {
     if (isManualRefresh) setRefreshing(true);
     else setLoading(true);
     try {
-      const queryParams = new URLSearchParams();
-      if (search) queryParams.append('search', search);
-      if (modeFilter !== 'All') queryParams.append('mode', modeFilter);
-      if (startDate) queryParams.append('startDate', startDate);
-      if (endDate) queryParams.append('endDate', endDate);
-
-      const res = await authFetch(`/api/settlements?${queryParams.toString()}`);
-      if (res.ok) {
-        const data = await res.json();
-        setSettlements(Array.isArray(data) ? data : (data.settlements || []));
-      } else {
-        setSettlements([]);
-      }
+      setSettlements(await fetchSettlementsData());
     } catch (error) {
       console.error('Failed to fetch settlements', error);
       setSettlements([]);
@@ -58,8 +61,12 @@ export default function SettlementsPage() {
   };
 
   useEffect(() => {
-    fetchSettlements();
-  }, [search, modeFilter, startDate, endDate]);
+    // State updates happen in .then/.finally callbacks, not synchronously in the effect.
+    fetchSettlementsData()
+      .then(s => setSettlements(s))
+      .catch(error => console.error('Failed to fetch settlements', error))
+      .finally(() => setLoading(false));
+  }, [fetchSettlementsData]);
 
   const toggleSelectAll = () => {
     if (selectedIds.length === settlements.length) {
@@ -69,7 +76,7 @@ export default function SettlementsPage() {
     }
   };
 
-  const toggleSelectOne = (id: string, e: React.MouseEvent) => {
+  const toggleSelectOne = (id: string, e: React.SyntheticEvent) => {
     e.stopPropagation();
     if (selectedIds.includes(id)) {
       setSelectedIds(selectedIds.filter(i => i !== id));
@@ -291,7 +298,7 @@ export default function SettlementsPage() {
                     <input
                       type="checkbox"
                       checked={selectedIds.includes(s.id)}
-                      onChange={(e) => toggleSelectOne(s.id, e as any)}
+                      onChange={(e) => toggleSelectOne(s.id, e)}
                       className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
                     />
                   </td>
@@ -308,7 +315,7 @@ export default function SettlementsPage() {
                   <td className="px-6 py-4">
                     {s.denominations && s.denominations.length > 0 ? (
                       <div className="flex flex-wrap gap-1">
-                        {s.denominations.filter((d: any) => d.quantity > 0).map((d: any) => (
+                        {s.denominations.filter(d => d.quantity > 0).map(d => (
                           <span key={d.denomination} className="px-2 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded text-xs">
                             ₹{d.denomination} × {d.quantity}
                           </span>

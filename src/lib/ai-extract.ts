@@ -37,8 +37,8 @@ Invoice text:
 ${text}`;
 }
 
-export function normalizeExtraction(raw: Record<string, any>): Partial<ExtractionResult> {
-  const parseNumber = (val: any): number | undefined => {
+export function normalizeExtraction(raw: Record<string, unknown>): Partial<ExtractionResult> {
+  const parseNumber = (val: unknown): number | undefined => {
     if (typeof val === 'number') return val;
     if (typeof val === 'string') {
       const num = parseFloat(val.replace(/[^\d.-]/g, ''));
@@ -47,13 +47,13 @@ export function normalizeExtraction(raw: Record<string, any>): Partial<Extractio
     return undefined;
   };
 
-  const parseString = (val: any): string | undefined => {
+  const parseString = (val: unknown): string | undefined => {
     if (typeof val === 'string') return val;
     if (val != null) return String(val);
     return undefined;
   };
 
-  const getField = (obj: any, keys: string[]) => {
+  const getField = (obj: Record<string, unknown>, keys: string[]): unknown => {
     for (const key of keys) {
       if (obj[key] !== undefined) return obj[key];
     }
@@ -63,7 +63,7 @@ export function normalizeExtraction(raw: Record<string, any>): Partial<Extractio
   let items: ExtractionItem[] = [];
   const rawItems = getField(raw, ['items', 'Items', 'lineItems', 'line_items']);
   if (Array.isArray(rawItems)) {
-    items = rawItems.map((item: any, index: number) => ({
+    items = rawItems.map((item: Record<string, unknown>, index: number) => ({
       srNo: parseNumber(getField(item, ['srNo', 'sr_no', 'slNo', 'sl_no'])) ?? index + 1,
       erpId: parseString(getField(item, ['erpId', 'erp_id', 'itemId', 'item_code'])),
       productName: parseString(getField(item, ['productName', 'product_name', 'description', 'item'])) || 'Unknown Product',

@@ -36,7 +36,7 @@ export async function POST(request: Request) {
     }
 
     const extracted = extractBillFromText(textToParse);
-    const validation = validateInvoiceData(extracted as any);
+    const validation = validateInvoiceData(extracted);
 
     return NextResponse.json({
       extraction: extracted,

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 
 type DenomCalculatorProps = {
   targetAmount?: number;
@@ -13,28 +13,31 @@ export default function DenominationCalculator({ targetAmount, onDenominationsCh
   const [counts, setCounts] = useState<Record<string, number>>(
     DENOMINATIONS.reduce((acc, curr) => ({ ...acc, [curr]: 0 }), {})
   );
-  
-  const [total, setTotal] = useState(0);
 
-  useEffect(() => {
-    const newTotal = DENOMINATIONS.reduce((sum, denom) => sum + denom * (counts[denom] || 0), 0);
-    setTotal(newTotal);
-    
+  // Derived state — recomputed on every render, no effect needed.
+  const total = DENOMINATIONS.reduce((sum, denom) => sum + denom * (counts[denom] || 0), 0);
+
+  const notifyChange = (nextCounts: Record<string, number>, nextTotal: number) => {
     if (onDenominationsChange) {
-      onDenominationsChange(counts, newTotal);
+      onDenominationsChange(nextCounts, nextTotal);
     }
-  }, [counts, onDenominationsChange]);
+  };
 
   const handleCountChange = (denom: number, val: string) => {
     const num = parseInt(val, 10);
-    setCounts(prev => ({
-      ...prev,
+    const next: Record<string, number> = {
+      ...counts,
       [denom]: isNaN(num) || num < 0 ? 0 : num
-    }));
+    };
+    const nextTotal = DENOMINATIONS.reduce((sum, d) => sum + d * (next[d] || 0), 0);
+    setCounts(next);
+    notifyChange(next, nextTotal);
   };
 
   const handleReset = () => {
-    setCounts(DENOMINATIONS.reduce((acc, curr) => ({ ...acc, [curr]: 0 }), {}));
+    const reset = DENOMINATIONS.reduce((acc, curr) => ({ ...acc, [curr]: 0 }), {});
+    setCounts(reset);
+    notifyChange(reset, 0);
   };
 
   const difference = (targetAmount || 0) - total;

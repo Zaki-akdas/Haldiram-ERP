@@ -1,6 +1,6 @@
 import { IngestFormat, IngestItem, IngestResult } from '../types';
 
-function parseNumber(val: any): number {
+function parseNumber(val: unknown): number {
   if (typeof val === 'number') return isNaN(val) ? 0 : val;
   if (!val) return 0;
   const cleaned = String(val).replace(/,/g, '').replace(/[^\d.-]/g, '').trim();
@@ -405,6 +405,13 @@ export function parseUnstructuredText(text: string): IngestResult {
         });
       }
     }
+  }
+
+  // Restore natural bill order: PDF extractors (pdf2json) can emit text bottom-up
+  // (y ascending), which would reverse the line items. Numbered items keep their
+  // original position via srNo.
+  if (items.length > 0 && items.every((item) => typeof item.srNo === 'number')) {
+    items.sort((a, b) => (a.srNo ?? 0) - (b.srNo ?? 0));
   }
 
   const calculatedTaxable = items.reduce((sum, item) => sum + item.taxableAmount, 0);

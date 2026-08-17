@@ -1,32 +1,45 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 import { useAuth } from '@/components/AuthProvider';
 import Link from 'next/link';
 
+// Theme is external state (localStorage + system preference); subscribe to it
+// with useSyncExternalStore so reads stay pure and updates flow through React.
+function subscribeToTheme(callback: () => void) {
+  window.addEventListener('storage', callback);
+  const mq = window.matchMedia('(prefers-color-scheme: dark)');
+  mq.addEventListener('change', callback);
+  return () => {
+    window.removeEventListener('storage', callback);
+    mq.removeEventListener('change', callback);
+  };
+}
+
+function getThemeSnapshot(): boolean {
+  const savedTheme = localStorage.getItem('theme');
+  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  return savedTheme === 'dark' || (!savedTheme && prefersDark);
+}
+
+function getServerSnapshot(): boolean {
+  return false;
+}
+
 export default function Header({ onToggleSidebar }: { onToggleSidebar: () => void }) {
   const { user } = useAuth();
-  const [isDark, setIsDark] = useState(false);
+  const isDark = useSyncExternalStore(subscribeToTheme, getThemeSnapshot, getServerSnapshot);
 
+  // Keep the DOM class in sync with the subscribed theme value.
   useEffect(() => {
-    const savedTheme = localStorage.getItem('theme');
-    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    if (savedTheme === 'dark' || (!savedTheme && prefersDark)) {
-      setIsDark(true);
-      document.documentElement.classList.add('dark');
-    }
-  }, []);
+    document.documentElement.classList.toggle('dark', isDark);
+  }, [isDark]);
 
   const toggleTheme = () => {
     const newDark = !isDark;
-    setIsDark(newDark);
-    if (newDark) {
-      document.documentElement.classList.add('dark');
-      localStorage.setItem('theme', 'dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-      localStorage.setItem('theme', 'light');
-    }
+    localStorage.setItem('theme', newDark ? 'dark' : 'light');
+    // The storage event does not fire in the same tab; notify subscribers manually.
+    window.dispatchEvent(new Event('storage'));
   };
 
   const today = new Date().toLocaleDateString('en-IN', {

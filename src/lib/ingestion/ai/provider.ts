@@ -1,8 +1,8 @@
-import { AIProviderConfig, ExtractionResult } from '@/lib/ai-provider';
+import { AIProviderConfig, ExtractionResult, type ExtractionItem } from '@/lib/ai-provider';
 import { normalizeExtraction, computeConfidence, buildExtractionPrompt } from '@/lib/ai-extract';
 
 export interface AIExtractionResult {
-  items: any[];
+  items: ExtractionItem[];
   confidence: number;
   provider: string;
   rawResponse?: string;
@@ -16,7 +16,7 @@ export async function extractWithProvider(text: string, config: AIProviderConfig
 
   try {
     let response: Response;
-    let parsedData: Record<string, any> = {};
+    let parsedData: Record<string, unknown> = {};
 
     switch (config.type) {
       case 'ollama':

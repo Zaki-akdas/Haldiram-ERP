@@ -1,8 +1,8 @@
 import { IngestResult, IngestItem } from './types';
 import { normalizeExtraction } from '@/lib/ai-extract';
 
-export function normalizeAIResult(aiResult: any): IngestResult {
-  const normalized = normalizeExtraction(aiResult);
+export function normalizeAIResult(aiResult: unknown): IngestResult {
+  const normalized = normalizeExtraction((aiResult ?? {}) as Record<string, unknown>);
   
   return {
     format: 'unstructured',
@@ -18,7 +18,7 @@ export function normalizeAIResult(aiResult: any): IngestResult {
       totalGst: normalized.totalGst,
       grandTotal: normalized.grandTotal,
     },
-    items: (normalized.items || []).map((item: any) => ({
+    items: (normalized.items || []).map((item) => ({
       srNo: item.srNo,
       erpId: item.erpId,
       productName: item.productName || 'Unknown Product',
@@ -31,6 +31,7 @@ export function normalizeAIResult(aiResult: any): IngestResult {
       gstRate: Math.min(28, Math.max(0, item.gstRate || 5)),
       gstAmount: item.gstAmount || 0,
       totalAmount: item.totalAmount || 0,
+      gstRateExplicit: item.gstRate !== undefined,
     })) as IngestItem[],
     confidence: normalized.confidence || 0,
     warnings: [],

@@ -13,12 +13,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (!isManager(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
     const { id } = await params;
-    const body = await req.json();
+    const body = (await req.json()) as Record<string, unknown>;
 
-    const updateData: any = { updatedAt: new Date() };
+    const updateData: Partial<typeof customers.$inferInsert> = { updatedAt: new Date() };
     for (const field of allowedCustomerFields) {
       if (body[field] !== undefined) {
-        updateData[field] = body[field];
+        (updateData as Record<string, unknown>)[field] = body[field];
       }
     }
 

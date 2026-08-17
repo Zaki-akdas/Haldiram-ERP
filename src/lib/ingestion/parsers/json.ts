@@ -1,11 +1,25 @@
 import { IngestFormat, IngestItem, IngestResult } from '../types';
 
-function parseNumber(val: any): number {
+function parseNumber(val: unknown): number {
   if (typeof val === 'number') return isNaN(val) ? 0 : val;
   if (!val) return 0;
   const cleaned = String(val).replace(/,/g, '').replace(/[^\d.-]/g, '').trim();
   const num = parseFloat(cleaned);
   return isNaN(num) ? 0 : num;
+}
+
+function getField(obj: unknown, keys: string[]): unknown {
+  if (!obj || typeof obj !== 'object') return undefined;
+  const rec = obj as Record<string, unknown>;
+  for (const k of keys) {
+    if (rec[k] !== undefined && rec[k] !== null) return rec[k];
+  }
+  return undefined;
+}
+
+function getString(obj: unknown, keys: string[]): string | undefined {
+  const val = getField(obj, keys);
+  return val == null ? undefined : String(val);
 }
 
 export function parseJSON(rawText: string): IngestResult {
@@ -23,7 +37,7 @@ export function parseJSON(rawText: string): IngestResult {
     };
   }
 
-  let parsed: any;
+  let parsed: unknown;
   try {
     parsed = JSON.parse(rawText);
   } catch {
@@ -41,55 +55,57 @@ export function parseJSON(rawText: string): IngestResult {
   // { invoice: { invoice_number, bill_date }, seller: { firm_name, gstin },
   //   buyer: { firm_name, gstin }, items: [{ sno, erp_id, item_name, taxable_value,
   //   gst_percent, gst_amount, total_value }], summary: { taxable_value, gst_amount, total_value } }
-  const get = (obj: any, keys: string[]): any => {
-    if (!obj || typeof obj !== 'object') return undefined;
-    for (const k of keys) {
-      if (obj[k] !== undefined && obj[k] !== null) return obj[k];
-    }
-    return undefined;
-  };
-
-  const inv = (parsed && typeof parsed === 'object' && typeof parsed.invoice === 'object') ? parsed.invoice : parsed;
-  const seller = (parsed && typeof parsed === 'object' && typeof parsed.seller === 'object') ? parsed.seller : parsed;
-  const buyer = (parsed && typeof parsed === 'object' && typeof parsed.buyer === 'object') ? parsed.buyer : parsed;
-  const summary = (parsed && typeof parsed === 'object' && typeof parsed.summary === 'object') ? parsed.summary : parsed;
+  const root = (parsed && typeof parsed === 'object') ? parsed as Record<string, unknown> : undefined;
+  const inv = (root && typeof root.invoice === 'object') ? root.invoice as Record<string, unknown> : root;
+  const seller = (root && typeof root.seller === 'object') ? root.seller as Record<string, unknown> : root;
+  const buyer = (root && typeof root.buyer === 'object') ? root.buyer as Record<string, unknown> : root;
+  const summary = (root && typeof root.summary === 'object') ? root.summary as Record<string, unknown> : root;
 
   const items: IngestItem[] = [];
-  const rawItems = Array.isArray(parsed) ? parsed : (parsed.items || parsed.data || parsed.lineItems || []);
+  const firstArray = (...vals: unknown[]): unknown[] => {
+    for (const v of vals) {
+      if (Array.isArray(v)) return v as unknown[];
+    }
+    return [];
+  };
+  const rawItems = firstArray(parsed, root?.items, root?.data, root?.lineItems);
 
-  rawItems.forEach((it: any, index: number) => {
-    const gstRate = parseNumber(get(it, ['gstRate', 'gst_rate', 'gstPercent', 'gst_percent', 'gst%', 'gst']));
+  rawItems.forEach((it: unknown, index: number) => {
+    const gstRateField = getField(it, ['gstRate', 'gst_rate', 'gstPercent', 'gst_percent', 'gst%', 'gst']);
+    const gstRate = parseNumber(gstRateField);
     items.push({
-      srNo: parseNumber(get(it, ['srNo', 'sr', 'sno', 'slNo'])) || index + 1,
-      erpId: get(it, ['erpId', 'erp_id', 'sku', 'code', 'itemCode', 'item_code']),
-      productName: get(it, ['productName', 'product_name', 'product', 'name', 'itemName', 'item_name', 'description']) || `Item ${index + 1}`,
-      hsnCode: get(it, ['hsnCode', 'hsn_code', 'hsn']) != null ? String(get(it, ['hsnCode', 'hsn_code', 'hsn'])) : undefined,
-      mrp: parseNumber(get(it, ['mrp'])),
-      quantity: parseNumber(get(it, ['quantity', 'qty'])) || 1,
-      unitPrice: parseNumber(get(it, ['unitPrice', 'unit_price', 'price', 'rate'])) || 0,
-      discount: parseNumber(get(it, ['discount', 'disc'])),
-      taxableAmount: parseNumber(get(it, ['taxableAmount', 'taxable_amount', 'taxable', 'taxableValue', 'taxable_value'])),
+      srNo: parseNumber(getField(it, ['srNo', 'sr', 'sno', 'slNo'])) || index + 1,
+      erpId: getString(it, ['erpId', 'erp_id', 'sku', 'code', 'itemCode', 'item_code']),
+      productName: getString(it, ['productName', 'product_name', 'product', 'name', 'itemName', 'item_name', 'description']) || `Item ${index + 1}`,
+      hsnCode: getString(it, ['hsnCode', 'hsn_code', 'hsn']),
+      mrp: parseNumber(getField(it, ['mrp'])),
+      quantity: parseNumber(getField(it, ['quantity', 'qty'])) || 1,
+      unitPrice: parseNumber(getField(it, ['unitPrice', 'unit_price', 'price', 'rate'])) || 0,
+      discount: parseNumber(getField(it, ['discount', 'disc'])),
+      taxableAmount: parseNumber(getField(it, ['taxableAmount', 'taxable_amount', 'taxable', 'taxableValue', 'taxable_value'])),
       gstRate: gstRate || 5,
-      gstAmount: parseNumber(get(it, ['gstAmount', 'gst_amount', 'gstAmt', 'gst_amt'])),
-      totalAmount: parseNumber(get(it, ['totalAmount', 'total_amount', 'totalValue', 'total_value', 'total'])) || 0,
+      gstAmount: parseNumber(getField(it, ['gstAmount', 'gst_amount', 'gstAmt', 'gst_amt'])),
+      totalAmount: parseNumber(getField(it, ['totalAmount', 'total_amount', 'totalValue', 'total_value', 'total'])) || 0,
+      ...(gstRateField !== undefined ? { gstRateExplicit: true as const } : {}),
+      ...(getField(it, ['unit', 'uom']) !== undefined ? { unitExplicit: true as const } : {}),
     });
   });
 
   return {
     format: 'json',
     header: {
-      invoiceNumber: get(inv, ['invoiceNumber', 'invoice_number', 'invoiceNo', 'invoice_no', 'billNumber', 'bill_number']),
-      invoiceDate: get(inv, ['invoiceDate', 'invoice_date', 'billDate', 'bill_date', 'date']),
-      sellerName: get(seller, ['sellerName', 'seller_name', 'firmName', 'firm_name', 'name']),
-      sellerGSTIN: get(seller, ['sellerGSTIN', 'seller_gstin', 'gstin']),
-      customerName: get(buyer, ['customerName', 'customer_name', 'buyerName', 'buyer_name', 'firmName', 'firm_name', 'name']),
-      customerGSTIN: get(buyer, ['customerGSTIN', 'customer_gstin', 'gstin']),
-      taxableAmount: parseNumber(get(summary, ['taxableAmount', 'taxable_amount', 'taxable', 'grossAmount', 'gross_amount'])) || parseNumber(get(parsed, ['taxableAmount', 'taxable_amount', 'subtotal'])),
-      cgst: parseNumber(get(summary, ['cgst', 'cgstAmount', 'cgst_amount'])),
-      sgst: parseNumber(get(summary, ['sgst', 'sgstAmount', 'sgst_amount'])),
-      igst: parseNumber(get(summary, ['igst', 'igstAmount', 'igst_amount'])),
-      totalGst: parseNumber(get(summary, ['totalGst', 'total_gst', 'gstAmount', 'gst_amount'])) || parseNumber(get(parsed, ['totalGst', 'total_gst'])),
-      grandTotal: parseNumber(get(summary, ['grandTotal', 'grand_total', 'totalValue', 'total_value', 'totalAmount', 'total_amount', 'total'])) || parseNumber(get(parsed, ['grandTotal', 'grand_total', 'totalAmount', 'total_amount', 'total'])),
+      invoiceNumber: getString(inv, ['invoiceNumber', 'invoice_number', 'invoiceNo', 'invoice_no', 'billNumber', 'bill_number']),
+      invoiceDate: getString(inv, ['invoiceDate', 'invoice_date', 'billDate', 'bill_date', 'date']),
+      sellerName: getString(seller, ['sellerName', 'seller_name', 'firmName', 'firm_name', 'name']),
+      sellerGSTIN: getString(seller, ['sellerGSTIN', 'seller_gstin', 'gstin']),
+      customerName: getString(buyer, ['customerName', 'customer_name', 'buyerName', 'buyer_name', 'firmName', 'firm_name', 'name']),
+      customerGSTIN: getString(buyer, ['customerGSTIN', 'customer_gstin', 'gstin']),
+      taxableAmount: parseNumber(getField(summary, ['taxableAmount', 'taxable_amount', 'taxable', 'grossAmount', 'gross_amount'])) || parseNumber(getField(parsed, ['taxableAmount', 'taxable_amount', 'subtotal'])),
+      cgst: parseNumber(getField(summary, ['cgst', 'cgstAmount', 'cgst_amount'])),
+      sgst: parseNumber(getField(summary, ['sgst', 'sgstAmount', 'sgst_amount'])),
+      igst: parseNumber(getField(summary, ['igst', 'igstAmount', 'igst_amount'])),
+      totalGst: parseNumber(getField(summary, ['totalGst', 'total_gst', 'gstAmount', 'gst_amount'])) || parseNumber(getField(parsed, ['totalGst', 'total_gst'])),
+      grandTotal: parseNumber(getField(summary, ['grandTotal', 'grand_total', 'totalValue', 'total_value', 'totalAmount', 'total_amount', 'total'])) || parseNumber(getField(parsed, ['grandTotal', 'grand_total', 'totalAmount', 'total_amount', 'total'])),
     },
     items,
     confidence: 100,

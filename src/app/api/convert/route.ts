@@ -43,7 +43,7 @@ export async function POST(request: Request) {
 
     const extracted = parseUniversalData(textToParse);
 
-    let result: any;
+    let result: string | typeof extracted = '';
     if (targetFormat === 'text') {
       result = textToParse;
     } else if (targetFormat === 'json') {

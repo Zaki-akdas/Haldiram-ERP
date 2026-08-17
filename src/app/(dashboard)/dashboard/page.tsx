@@ -5,9 +5,44 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { useAuth } from '@/components/AuthProvider';
 
+interface DashboardRecentOrder {
+  id: number;
+  invoiceNumber: string | null;
+  customerId: number | null;
+  customer?: { name: string } | null;
+  grandTotal: string | null;
+  status: string;
+  createdAt: Date | string | null;
+}
+
+interface DashboardData {
+  totalOrders: number;
+  totalCustomers: number;
+  totalRevenue: string | number | null;
+  totalCollected: string | number | null;
+  pendingSettlements: number;
+  recentOrders: DashboardRecentOrder[];
+  activeReceivables: Array<{
+    id: number;
+    invoiceNumber: string | null;
+    customerId: number | null;
+    customer?: { name: string } | null;
+    grandTotal: string | null;
+    amountPaid: string | null;
+    balance: string | null;
+    dueDate: Date | string | null;
+  }>;
+  salespeoplePerformance: Array<{
+    name: string;
+    orderCount: number;
+    totalRevenue: string | number | null;
+    totalCollected: string | number | null;
+  }>;
+}
+
 export default function DashboardPage() {
   const { user, authFetch } = useAuth();
-  const [data, setData] = useState<any>(null);
+  const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -50,7 +85,7 @@ export default function DashboardPage() {
       pendingSettlements: data?.pendingSettlements ?? 0,
     },
     recentShipments: (data?.recentOrders && data.recentOrders.length > 0)
-      ? data.recentOrders.map((o: any) => ({
+      ? data.recentOrders.map((o) => ({
           id: o?.invoiceNumber || `INV-${o?.id}`,
           customer: o?.customer?.name || `Customer #${o?.customerId}`,
           amount: Number(o?.grandTotal || 0),
@@ -59,7 +94,7 @@ export default function DashboardPage() {
         }))
       : [],
     activeReceivables: (data?.activeReceivables && data.activeReceivables.length > 0)
-      ? data.activeReceivables.map((r: any) => ({
+      ? data.activeReceivables.map((r) => ({
           customer: r?.customer?.name || `Customer #${r?.customerId}`,
           invoice: r?.invoiceNumber || `INV-${r?.id}`,
           total: Number(r?.grandTotal || 0),
@@ -69,7 +104,7 @@ export default function DashboardPage() {
         }))
       : [],
     teamPerformance: (data?.salespeoplePerformance && data.salespeoplePerformance.length > 0)
-      ? data.salespeoplePerformance.map((sp: any) => ({
+      ? data.salespeoplePerformance.map((sp) => ({
           name: sp.name,
           orders: sp.orderCount || 0,
           sales: Number(sp.totalRevenue || 0),
@@ -194,7 +229,7 @@ export default function DashboardPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                {dashboardData.recentShipments.slice(0, 5).map((order: any, i: number) => (
+                {dashboardData.recentShipments.slice(0, 5).map((order, i: number) => (
                   <tr key={i} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
                     <td className="px-4 py-3.5 font-bold text-slate-900 dark:text-white">{order.id}</td>
                     <td className="px-4 py-3.5 font-medium">{order.customer}</td>

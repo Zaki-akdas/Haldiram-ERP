@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/components/AuthProvider';
 import Link from 'next/link';
+import type { ActivityResponse } from '@/lib/api-types';
 
-function getRelativeTime(date: Date | string | undefined): string {
+function getRelativeTime(date: Date | string | null | undefined): string {
   if (!date) return 'Unknown time';
   const d = new Date(date);
   if (isNaN(d.getTime())) return 'Unknown time';
@@ -22,35 +23,43 @@ function getRelativeTime(date: Date | string | undefined): string {
 
 export default function ActivityPage() {
   const { user, authFetch } = useAuth();
-  const [activities, setActivities] = useState<any[]>([]);
+  const [activities, setActivities] = useState<ActivityResponse['activities']>([]);
   const [loading, setLoading] = useState(true);
   const [filterType, setFilterType] = useState('All');
   
   const types = ['All', 'Login', 'Logout', 'Order Created', 'Order Updated', 'Settlement', 'Invoice Uploaded', 'Customer Added', 'Product Added'];
 
-  const fetchActivity = async () => {
-    setLoading(true);
+  const fetchActivity = useCallback(async () => {
     try {
       const res = await authFetch('/api/activity');
       if (res.ok) {
         const json = await res.json();
         if (Array.isArray(json?.activities)) {
-          setActivities(json.activities);
-          setLoading(false);
-          return;
+          return json.activities as ActivityResponse['activities'];
         }
       }
     } catch (err) {
       console.error(err);
     }
-    setActivities([]);
-    setLoading(false);
+    return [] as ActivityResponse['activities'];
+  }, [authFetch]);
+
+  const refreshActivity = () => {
+    setLoading(true);
+    fetchActivity()
+      .then(acts => setActivities(acts))
+      .catch(err => console.error(err))
+      .finally(() => setLoading(false));
   };
 
   useEffect(() => {
     if (user?.role !== 'admin' && user?.role !== 'manager') return;
-    fetchActivity();
-  }, [user, authFetch]);
+    // State updates happen in .then/.finally callbacks, not synchronously in the effect.
+    fetchActivity()
+      .then(acts => setActivities(acts))
+      .catch(err => console.error(err))
+      .finally(() => setLoading(false));
+  }, [user, authFetch, fetchActivity]);
 
   if (user?.role === 'salesperson') {
     return (
@@ -87,7 +96,7 @@ export default function ActivityPage() {
           <p className="text-slate-500 dark:text-slate-400 mt-1">System audit trail and real-time distribution events</p>
         </div>
         <button
-          onClick={fetchActivity}
+          onClick={refreshActivity}
           className="px-4 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-sm rounded-xl border border-slate-200 dark:border-slate-700 flex items-center gap-2 transition-all"
         >
           <svg className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">

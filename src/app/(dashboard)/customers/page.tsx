@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/components/AuthProvider';
 
 interface Customer {
@@ -62,17 +62,20 @@ export default function CustomersPage() {
 
   const canEdit = user?.role === 'admin' || user?.role === 'manager';
 
+  const fetchCustomersData = useCallback(async () => {
+    const res = await authFetch(`/api/customers${search ? `?search=${encodeURIComponent(search)}` : ''}`);
+    if (res.ok) {
+      const data = await res.json();
+      return Array.isArray(data) ? data as Customer[] : (data.customers || []) as Customer[];
+    }
+    return [] as Customer[];
+  }, [authFetch, search]);
+
   const fetchCustomers = async (isManualRefresh = false) => {
     if (isManualRefresh) setRefreshing(true);
     else setLoading(true);
     try {
-      const res = await authFetch(`/api/customers${search ? `?search=${encodeURIComponent(search)}` : ''}`);
-      if (res.ok) {
-        const data = await res.json();
-        setCustomers(Array.isArray(data) ? data : (data.customers || []));
-      } else {
-        setCustomers([]);
-      }
+      setCustomers(await fetchCustomersData());
     } catch (error) {
       console.error('Failed to fetch customers', error);
       setCustomers([]);
@@ -82,23 +85,34 @@ export default function CustomersPage() {
     }
   };
 
+  const fetchSalespeopleData = useCallback(async () => {
+    if (!canEdit) return [] as Salesperson[];
+    const res = await authFetch('/api/salespeople');
+    if (res.ok) {
+      const data = await res.json();
+      return Array.isArray(data) ? data as Salesperson[] : (data.salespeople || []) as Salesperson[];
+    }
+    return [] as Salesperson[];
+  }, [authFetch, canEdit]);
+
   const fetchSalespeople = async () => {
-    if (!canEdit) return;
     try {
-      const res = await authFetch('/api/salespeople');
-      if (res.ok) {
-        const data = await res.json();
-        setSalespeople(Array.isArray(data) ? data : (data.salespeople || []));
-      }
+      setSalespeople(await fetchSalespeopleData());
     } catch (error) {
       console.error('Failed to fetch salespeople', error);
     }
   };
 
   useEffect(() => {
-    fetchCustomers();
-    fetchSalespeople();
-  }, [search]);
+    // State updates happen in .then/.finally callbacks, not synchronously in the effect.
+    fetchCustomersData()
+      .then(c => setCustomers(c))
+      .catch(error => console.error('Failed to fetch customers', error))
+      .finally(() => setLoading(false));
+    fetchSalespeopleData()
+      .then(s => setSalespeople(s))
+      .catch(error => console.error('Failed to fetch salespeople', error));
+  }, [fetchCustomersData, fetchSalespeopleData]);
 
   const toggleSelectAll = () => {
     if (selectedIds.length === customers.length) {
@@ -108,7 +122,7 @@ export default function CustomersPage() {
     }
   };
 
-  const toggleSelectOne = (id: string, e: React.MouseEvent) => {
+  const toggleSelectOne = (id: string, e: React.SyntheticEvent) => {
     e.stopPropagation();
     if (selectedIds.includes(id)) {
       setSelectedIds(selectedIds.filter(i => i !== id));
@@ -290,7 +304,7 @@ export default function CustomersPage() {
                   <input
                     type="checkbox"
                     checked={selectedIds.includes(c.id)}
-                    onChange={(e) => toggleSelectOne(c.id, e as any)}
+                    onChange={(e) => toggleSelectOne(c.id, e)}
                     onClick={(e) => e.stopPropagation()}
                     className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
                   />

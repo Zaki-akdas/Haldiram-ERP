@@ -10,44 +10,34 @@ export interface AuthUser {
   phone?: string;
   avatar?: string;
   isActive?: boolean;
+  mustResetPassword?: boolean;
 }
 
 interface AuthContextType {
   user: AuthUser | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  login: (email: string, password: string) => Promise<{ success: boolean; error?: string; user?: AuthUser }>;
   logout: () => Promise<void>;
+  refreshUser: () => Promise<AuthUser | null>;
   authFetch: (url: string, options?: RequestInit) => Promise<Response>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const TOKEN_KEY = 'salessettle_token';
-
-// Safe localStorage helpers for iframe environments
-function getToken(): string | null {
-  try { return localStorage.getItem(TOKEN_KEY); } catch { return null; }
-}
-function setToken(token: string): void {
-  try { localStorage.setItem(TOKEN_KEY, token); } catch { /* ignore */ }
-}
-function removeToken(): void {
-  try { localStorage.removeItem(TOKEN_KEY); } catch { /* ignore */ }
-}
-
+// Sessions live in httpOnly cookies set by the server (/api/auth/login), so the
+// client never sees or stores the access token — it is safe from XSS and is
+// transparently refreshed server-side (proxy + route handlers).
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
-  // Validate session on mount
+  // Validate session on mount (cookies are sent automatically)
   useEffect(() => {
-    const token = getToken();
-    if (!token) { setLoading(false); return; }
-    fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } })
+    fetch('/api/auth/me')
       .then(r => r.ok ? r.json() : null)
       .then(data => { if (data) setUser(data); })
-      .catch(() => { removeToken(); })
+      .catch(() => { /* stay logged out */ })
       .finally(() => setLoading(false));
   }, []);
 
@@ -59,10 +49,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify({ email, password }),
       });
       const data = await res.json();
-      if (res.ok && data.token) {
-        setToken(data.token);
+      if (res.ok && data.user) {
         setUser(data.user);
-        return { success: true };
+        return { success: true, user: data.user };
       }
       return { success: false, error: data.error || 'Login failed' };
     } catch {
@@ -70,28 +59,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const logout = useCallback(async () => {
-    const token = getToken();
-    if (token) {
-      try {
-        await fetch('/api/auth/logout', {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}` },
-        });
-      } catch { /* ignore */ }
+  const refreshUser = useCallback(async () => {
+    try {
+      const res = await fetch('/api/auth/me');
+      if (!res.ok) return null;
+      const data = await res.json();
+      setUser(data);
+      return data as AuthUser;
+    } catch {
+      return null;
     }
-    removeToken();
+  }, []);
+
+  const logout = useCallback(async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } catch { /* ignore */ }
     setUser(null);
     router.push('/login');
   }, [router]);
 
   const authFetch = useCallback(async (url: string, options: RequestInit = {}) => {
-    const token = getToken();
-    const headers = new Headers(options.headers);
-    if (token) headers.set('Authorization', `Bearer ${token}`);
-    const res = await fetch(url, { ...options, headers });
+    const res = await fetch(url, options);
     if (res.status === 401) {
-      removeToken();
       setUser(null);
       router.push('/login');
     }
@@ -99,7 +89,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [router]);
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, authFetch }}>
+    <AuthContext.Provider value={{ user, loading, login, logout, refreshUser, authFetch }}>
       {children}
     </AuthContext.Provider>
   );

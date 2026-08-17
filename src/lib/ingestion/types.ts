@@ -17,6 +17,12 @@ export interface IngestItem {
   gstRate: number;
   gstAmount: number;
   totalAmount: number;
+  /** Catalog product the user linked manually in the review UI. */
+  productId?: number | null;
+  /** True when the source bill explicitly stated the GST rate (not a parser default). */
+  gstRateExplicit?: boolean;
+  /** True when the source bill explicitly stated the unit (not a 'PCS' default). */
+  unitExplicit?: boolean;
 }
 
 export interface IngestHeader {

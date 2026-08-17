@@ -1,18 +1,32 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/components/AuthProvider';
+
+interface SalespersonRow {
+  id: number | string;
+  name: string;
+  email?: string;
+  role?: string;
+  phone?: string | null;
+  avatar?: string | null;
+  isActive?: boolean;
+  sales: number;
+  collections: number;
+  orders: number;
+  customers: number;
+}
 
 export default function SalespeoplePage() {
   const { user, authFetch } = useAuth();
   
-  const [salespeople, setSalespeople] = useState<any[]>([]);
+  const [salespeople, setSalespeople] = useState<SalespersonRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<any[]>([]);
+  const [selectedIds, setSelectedIds] = useState<(number | string)[]>([]);
   
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingPerson, setEditingPerson] = useState<any>(null);
+  const [editingPerson, setEditingPerson] = useState<SalespersonRow | null>(null);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -31,9 +45,15 @@ export default function SalespeoplePage() {
       const res = await authFetch('/api/salespeople');
       if (res.ok) {
         const data = await res.json();
-        const rawList = Array.isArray(data) ? data : (data.salespeople || []);
-        const formatted = rawList.map((sp: any) => ({
-          ...sp,
+        const rawList = Array.isArray(data) ? data as Record<string, unknown>[] : (data.salespeople || []) as Record<string, unknown>[];
+        const formatted: SalespersonRow[] = rawList.map((sp) => ({
+          id: sp.id as number | string,
+          name: String(sp.name || ''),
+          email: sp.email != null ? String(sp.email) : undefined,
+          role: sp.role != null ? String(sp.role) : undefined,
+          phone: sp.phone != null ? String(sp.phone) : null,
+          avatar: sp.avatar != null ? String(sp.avatar) : null,
+          isActive: sp.isActive != null ? Boolean(sp.isActive) : undefined,
           sales: Number(sp.sales || sp.totalRevenue || 0),
           collections: Number(sp.collections || sp.totalCollected || 0),
           orders: Number(sp.orders || sp.orderCount || 0),
@@ -54,8 +74,32 @@ export default function SalespeoplePage() {
   };
 
   useEffect(() => {
-    if (canAccess) fetchSalespeople();
-  }, [canAccess]);
+    if (canAccess) {
+      // State updates happen in .then/.finally callbacks, not synchronously in the effect.
+      authFetch('/api/salespeople')
+        .then(async res => {
+          if (!res.ok) return;
+          const data = await res.json();
+          const rawList = Array.isArray(data) ? data as Record<string, unknown>[] : (data.salespeople || []) as Record<string, unknown>[];
+          const formatted: SalespersonRow[] = rawList.map((sp) => ({
+            id: sp.id as number | string,
+            name: String(sp.name || ''),
+            email: sp.email != null ? String(sp.email) : undefined,
+            role: sp.role != null ? String(sp.role) : undefined,
+            phone: sp.phone != null ? String(sp.phone) : null,
+            avatar: sp.avatar != null ? String(sp.avatar) : null,
+            isActive: sp.isActive != null ? Boolean(sp.isActive) : undefined,
+            sales: Number(sp.sales || sp.totalRevenue || 0),
+            collections: Number(sp.collections || sp.totalCollected || 0),
+            orders: Number(sp.orders || sp.orderCount || 0),
+            customers: Number(sp.customers || sp.customerCount || 0),
+          }));
+          setSalespeople(formatted);
+        })
+        .catch(err => console.error('Failed to fetch salespeople', err))
+        .finally(() => { setLoading(false); setRefreshing(false); });
+    }
+  }, [canAccess, authFetch]);
 
   const toggleSelectAll = () => {
     if (selectedIds.length === salespeople.length) {
@@ -65,7 +109,7 @@ export default function SalespeoplePage() {
     }
   };
 
-  const toggleSelectOne = (id: any, e: React.MouseEvent) => {
+  const toggleSelectOne = (id: number | string, e: React.SyntheticEvent) => {
     e.stopPropagation();
     if (selectedIds.includes(id)) {
       setSelectedIds(selectedIds.filter(i => i !== id));
@@ -74,7 +118,7 @@ export default function SalespeoplePage() {
     }
   };
 
-  const handleDeleteSingle = async (id: any, e: React.MouseEvent) => {
+  const handleDeleteSingle = async (id: number | string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (!confirm('Are you sure you want to delete this team member?')) return;
     try {
@@ -185,7 +229,7 @@ export default function SalespeoplePage() {
                   <input
                     type="checkbox"
                     checked={selectedIds.includes(sp.id)}
-                    onChange={(e) => toggleSelectOne(sp.id, e as any)}
+                    onChange={(e) => toggleSelectOne(sp.id, e)}
                     className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
                   />
                   <div>

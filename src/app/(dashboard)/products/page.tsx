@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Image from 'next/image';
 import { useAuth } from '@/components/AuthProvider';
 
@@ -39,17 +39,20 @@ export default function ProductsPage() {
 
   const canAccess = user?.role === 'admin' || user?.role === 'manager';
 
+  const fetchProductsData = useCallback(async () => {
+    const res = await authFetch('/api/products');
+    if (res.ok) {
+      const data = await res.json();
+      return Array.isArray(data) ? data as Product[] : (data.products || []) as Product[];
+    }
+    return [] as Product[];
+  }, [authFetch]);
+
   const fetchProducts = async (isManualRefresh = false) => {
     if (isManualRefresh) setRefreshing(true);
     else setLoading(true);
     try {
-      const res = await authFetch('/api/products');
-      if (res.ok) {
-        const data = await res.json();
-        setProducts(Array.isArray(data) ? data : (data.products || []));
-      } else {
-        setProducts([]);
-      }
+      setProducts(await fetchProductsData());
     } catch (error) {
       console.error('Failed to fetch products', error);
       setProducts([]);
@@ -60,8 +63,25 @@ export default function ProductsPage() {
   };
 
   useEffect(() => {
-    if (canAccess) fetchProducts();
-  }, [canAccess]);
+    if (canAccess) {
+      // State updates happen in .then/.finally callbacks, not synchronously in the effect.
+      fetchProductsData()
+        .then(p => setProducts(p))
+        .catch(error => console.error('Failed to fetch products', error))
+        .finally(() => setLoading(false));
+    }
+  }, [canAccess, fetchProductsData]);
+
+  // Support deep links like /products?search=P101 (used by the order page's
+  // "linked product" links) — seed the search box from the URL. The URL is
+  // only readable on the client, and the update is deferred out of the
+  // effect body to avoid a cascading render on mount.
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search).get('search');
+    if (!q) return;
+    const t = setTimeout(() => setSearch(q), 0);
+    return () => clearTimeout(t);
+  }, []);
 
   const toggleSelectAll = () => {
     if (selectedIds.length === filteredProducts.length) {
@@ -71,7 +91,7 @@ export default function ProductsPage() {
     }
   };
 
-  const toggleSelectOne = (id: string, e: React.MouseEvent) => {
+  const toggleSelectOne = (id: string, e: React.SyntheticEvent) => {
     e.stopPropagation();
     if (selectedIds.includes(id)) {
       setSelectedIds(selectedIds.filter(i => i !== id));
@@ -316,7 +336,7 @@ export default function ProductsPage() {
                       <input
                         type="checkbox"
                         checked={selectedIds.includes(p.id)}
-                        onChange={(e) => toggleSelectOne(p.id, e as any)}
+                        onChange={(e) => toggleSelectOne(p.id, e)}
                         className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
                       />
                     </td>

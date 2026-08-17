@@ -71,7 +71,7 @@ const recentOrdersRaw = await db
       .orderBy(desc(sql`CAST(${orders.balance} AS DECIMAL)`))
       .limit(10);
 
-    let salespeoplePerformance: any[] = [];
+    let salespeoplePerformance: { id: number; name: string; orderCount: number; totalRevenue: number }[] = [];
     if (isManager(user.role)) {
       const salespeople = await db.select().from(users).where(eq(users.role, 'salesperson'));
       

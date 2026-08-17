@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { db } from '@/db';
-import { settlements, orders, customers, users, activityLogs } from '@/db/schema';
+import { settlements, orders, customers, users, activityLogs, settlementStatusEnum, type Settlement } from '@/db/schema';
+
+type SettlementStatus = (typeof settlementStatusEnum.enumValues)[number];
 import { eq, desc, and, count, gte, lte, like, or } from 'drizzle-orm';
 
 export async function GET(req: NextRequest) {
@@ -128,7 +130,7 @@ export async function POST(req: NextRequest) {
     const newAmountPaid = Number(order.amountPaid) + Number(amount);
     const balance = Number(order.grandTotal) - newAmountPaid;
 
-    let settlementStatus = 'pending';
+    let settlementStatus: SettlementStatus = 'pending';
     if (balance <= 0) {
       settlementStatus = 'settled';
     } else if (newAmountPaid > 0) {
@@ -139,7 +141,7 @@ export async function POST(req: NextRequest) {
       .set({
         amountPaid: newAmountPaid.toString(),
         balance: Math.max(0, balance).toString(),
-        settlementStatus: settlementStatus as any,
+        settlementStatus,
         updatedAt: new Date()
       })
       .where(eq(orders.id, order.id));
@@ -170,7 +172,7 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: 'No settlement IDs provided' }, { status: 400 });
     }
 
-    const deletedSettlements = [];
+    const deletedSettlements: Settlement[] = [];
     for (const id of ids) {
       const [deleted] = await db.delete(settlements).where(eq(settlements.id, id)).returning();
       if (deleted) {
@@ -178,14 +180,14 @@ export async function DELETE(req: NextRequest) {
       }
     }
 
-    const orderIds = [...new Set(deletedSettlements.map((s: any) => s.orderId))];
+    const orderIds = [...new Set(deletedSettlements.map(s => s.orderId))];
     for (const orderId of orderIds) {
       const allSettlements = await db.select().from(settlements).where(eq(settlements.orderId, orderId));
-      const totalPaid = allSettlements.reduce((sum: number, s: any) => sum + Number(s.amount || 0), 0);
+      const totalPaid = allSettlements.reduce((sum: number, s) => sum + Number(s.amount || 0), 0);
 
       const [order] = await db.select().from(orders).where(eq(orders.id, orderId));
       if (order) {
-        let settlementStatus = 'pending';
+        let settlementStatus: SettlementStatus = 'pending';
         if (totalPaid >= Number(order.grandTotal)) {
           settlementStatus = 'settled';
         } else if (totalPaid > 0) {
@@ -196,7 +198,7 @@ export async function DELETE(req: NextRequest) {
           .set({
             amountPaid: totalPaid.toString(),
             balance: Math.max(0, Number(order.grandTotal) - totalPaid).toString(),
-            settlementStatus: settlementStatus as any,
+            settlementStatus,
             updatedAt: new Date()
           })
           .where(eq(orders.id, orderId));

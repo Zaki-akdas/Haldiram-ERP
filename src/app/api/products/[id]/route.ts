@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser, isManager } from '@/lib/auth';
 import { db } from '@/db';
-import { products, activityLogs } from '@/db/schema';
+import { products, activityLogs, type NewProduct } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 
 const allowedProductFields = ['erpId', 'name', 'description', 'category', 'unit', 'mrp', 'basePrice', 'gstRate', 'hsnCode', 'stockQty', 'isActive'];
@@ -13,12 +13,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (!isManager(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
     const { id } = await params;
-    const body = await req.json();
+    const body = await req.json() as Record<string, unknown>;
 
-    const updateData: any = { updatedAt: new Date() };
+    const updateData: Partial<NewProduct> = { updatedAt: new Date() };
     for (const field of allowedProductFields) {
       if (body[field] !== undefined) {
-        updateData[field] = body[field];
+        (updateData as Record<string, unknown>)[field] = body[field];
       }
     }
 

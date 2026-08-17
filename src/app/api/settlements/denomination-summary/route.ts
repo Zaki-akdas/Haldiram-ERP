@@ -38,12 +38,13 @@ export async function GET(req: NextRequest) {
     const denominationMap = new Map<number, { totalQuantity: number; totalValue: number }>();
 
     for (const s of rawSettlements) {
-      const denoms = s.denominations as any;
-      if (!denoms || !Array.isArray(denoms)) continue;
+      const denoms: unknown = s.denominations;
+      if (!Array.isArray(denoms)) continue;
 
       for (const d of denoms) {
-        const denom = Number(d.denomination);
-        const qty = Number(d.quantity || 0);
+        const rec = d as { denomination?: unknown; quantity?: unknown };
+        const denom = Number(rec.denomination);
+        const qty = Number(rec.quantity || 0);
         if (!denom || qty <= 0) continue;
 
         const existing = denominationMap.get(denom) || { totalQuantity: 0, totalValue: 0 };

@@ -13,8 +13,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
-    if (!loading && !user) {
-      router.push('/login');
+    if (!loading) {
+      if (!user) {
+        router.push('/login');
+      } else if (user.mustResetPassword) {
+        // Accounts bootstrapped with a one-time password must set their own
+        // password before using the application.
+        router.replace('/set-password');
+      }
     }
   }, [user, loading, router]);
 

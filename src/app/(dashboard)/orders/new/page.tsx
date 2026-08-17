@@ -4,6 +4,25 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/components/AuthProvider';
+import type { Customer } from '@/db/schema';
+
+interface OrderProduct {
+  id: string;
+  erpId: string;
+  name: string;
+  price: number;
+  gstRate: number;
+}
+
+interface OrderItemDraft {
+  productId: string;
+  productName: string;
+  erpId?: string;
+  quantity: number;
+  unitPrice: number;
+  discount: number;
+  gstRate: number;
+}
 
 export default function NewOrderPage() {
   const router = useRouter();
@@ -11,12 +30,12 @@ export default function NewOrderPage() {
   
   const [submitting, setSubmitting] = useState(false);
   const [notification, setNotification] = useState('');
-  const [customers, setCustomers] = useState<any[]>([]);
-  const [products, setProducts] = useState<any[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [products, setProducts] = useState<OrderProduct[]>([]);
   
   // Order Details
   const [customerId, setCustomerId] = useState('');
-  const [invoiceNumber, setInvoiceNumber] = useState(`INV-${Date.now().toString().slice(-6)}`);
+  const [invoiceNumber, setInvoiceNumber] = useState(`INV-${new Date().getTime().toString().slice(-6)}`);
   const [orderDate, setOrderDate] = useState(new Date().toISOString().split('T')[0]);
   const [deliveryDate, setDeliveryDate] = useState('');
   const [beat, setBeat] = useState('');
@@ -24,7 +43,7 @@ export default function NewOrderPage() {
   const [notes, setNotes] = useState('');
   
   // Order Items
-  const [items, setItems] = useState<any[]>([]);
+  const [items, setItems] = useState<OrderItemDraft[]>([]);
   const [productSearch, setProductSearch] = useState('');
 
   const [loadingCustomers, setLoadingCustomers] = useState(false);
@@ -37,7 +56,7 @@ export default function NewOrderPage() {
         const res = await authFetch('/api/customers?limit=200');
         if (res.ok) {
           const data = await res.json();
-          const list = Array.isArray(data) ? data : (data.customers || []);
+          const list = Array.isArray(data) ? data as Customer[] : (data.customers || []) as Customer[];
           setCustomers(list);
         }
       } catch (err) {
@@ -53,11 +72,11 @@ export default function NewOrderPage() {
         const res = await authFetch('/api/products?limit=500');
         if (res.ok) {
           const data = await res.json();
-          const list = Array.isArray(data) ? data : (data.products || []);
-          setProducts(list.map((p: any) => ({
+          const list = Array.isArray(data) ? data as Record<string, unknown>[] : (data.products || []) as Record<string, unknown>[];
+          setProducts(list.map((p) => ({
             id: String(p.id),
-            erpId: p.erpId || '',
-            name: p.name,
+            erpId: p.erpId ? String(p.erpId) : '',
+            name: String(p.name || ''),
             price: Number(p.basePrice || 0),
             gstRate: Number(p.gstRate || 5),
           })));
@@ -78,7 +97,7 @@ export default function NewOrderPage() {
     return Number(amount || 0).toLocaleString('en-IN', { style: 'currency', currency: 'INR' });
   };
 
-  const handleAddProduct = (product: any) => {
+  const handleAddProduct = (product: OrderProduct) => {
     const existingItem = items.find(item => item.productId === product.id);
     if (existingItem) {
       updateItem(product.id, 'quantity', existingItem.quantity + 1);
@@ -214,7 +233,7 @@ try {
                 <label className="text-sm font-medium text-gray-300 mb-1 block">Customer *</label>
                 <select className="input-field w-full" value={customerId} onChange={e => setCustomerId(e.target.value)} required disabled={loadingCustomers}>
                   <option value="">{loadingCustomers ? 'Loading customers...' : 'Select Customer'}</option>
-                  {customers.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </div>
 

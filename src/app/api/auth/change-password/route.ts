@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
-import { logoutSession } from '@/lib/auth-session';
+import { changePassword } from '@/lib/auth-session';
 
 export async function POST(req: NextRequest) {
-  return logoutSession(req);
+  return changePassword(req);
 }

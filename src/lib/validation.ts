@@ -1,7 +1,7 @@
 import { ExtractionResult } from './ai-provider';
 
 export function validateGSTIN(gstin: string) {
-  const format = /^\d{2}[A-Z]{5}\d{4}[A-Z]\d[A-Z\d]Z[A-Z\d]$/;
+  const format = /^\d{2}[A-Z]{5}\d{4}[A-Z]\dZ[A-Z\d]$/;
   const errors: string[] = [];
   if (!gstin) return { valid: false, errors: ['GSTIN is required'] };
   if (gstin.length !== 15) errors.push('GSTIN must be 15 characters long');
@@ -53,7 +53,9 @@ export function validateInvoiceNumber(invoiceNumber: string) {
   return { valid, format: valid ? 'valid' : 'invalid' };
 }
 
-export function validateInvoiceData(data: ExtractionResult) {
+type ValidatableInvoice = Pick<ExtractionResult, 'invoiceNumber' | 'invoiceDate' | 'customerGSTIN' | 'grandTotal' | 'items'>;
+
+export function validateInvoiceData(data: ValidatableInvoice) {
   let score = 100;
   const issues: string[] = [];
   const warnings: string[] = [];

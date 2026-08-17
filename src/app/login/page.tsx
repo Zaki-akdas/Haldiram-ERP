@@ -12,7 +12,10 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  
+  const [bootstrap, setBootstrap] = useState<{ email: string; oneTimePassword: string } | null>(null);
+  const [bootstrapMsg, setBootstrapMsg] = useState('');
+  const [isBootstrapLoading, setIsBootstrapLoading] = useState(false);
+
   const router = useRouter();
   const { login, user } = useAuth();
 
@@ -30,7 +33,8 @@ export default function LoginPage() {
     try {
       const res = await login(email, password);
       if (res.success) {
-        router.push('/dashboard');
+        // Bootstrapped accounts must set their own password before entering.
+        router.replace(res.user?.mustResetPassword ? '/set-password' : '/dashboard');
       } else {
         setError(res.error || 'Invalid email or password');
       }
@@ -41,9 +45,27 @@ export default function LoginPage() {
     }
   };
 
-  const fillAdminCredentials = () => {
-    setEmail('admin@haldiram.com');
-    setPassword('supabase_managed');
+  const handleBootstrap = async () => {
+    setError('');
+    setBootstrapMsg('');
+    setIsBootstrapLoading(true);
+    try {
+      const res = await fetch('/api/auth/bootstrap', { method: 'POST' });
+      const data = await res.json();
+      if (res.status === 201) {
+        setBootstrap({ email: data.email, oneTimePassword: data.oneTimePassword });
+        setEmail(data.email);
+        setBootstrapMsg('Admin account created. Sign in with the one-time password — you will be asked to set a new password.');
+      } else if (res.status === 409) {
+        setBootstrapMsg('This system is already initialized — sign in with your credentials.');
+      } else {
+        setBootstrapMsg(data.error || 'Bootstrap failed — check the server logs.');
+      }
+    } catch {
+      setBootstrapMsg('Bootstrap failed — check the server logs.');
+    } finally {
+      setIsBootstrapLoading(false);
+    }
   };
 
   return (
@@ -130,18 +152,9 @@ export default function LoginPage() {
             </div>
 
             <div className="space-y-1">
-              <div className="flex justify-between items-center">
-                <label className="text-xs font-semibold text-gray-300 uppercase tracking-wider" htmlFor="password">
-                  Password
-                </label>
-                <button
-                  type="button"
-                  onClick={fillAdminCredentials}
-                  className="text-xs text-indigo-400 hover:text-indigo-300 underline font-medium"
-                >
-                  Use Demo Admin
-                </button>
-              </div>
+              <label className="text-xs font-semibold text-gray-300 uppercase tracking-wider" htmlFor="password">
+                Password
+              </label>
               <div className="relative">
                 <input
                   id="password"
@@ -171,11 +184,44 @@ export default function LoginPage() {
             </button>
           </form>
 
-          <div className="mt-6 text-center text-xs text-gray-400">
-            Need access? Contact your Admin.{' '}
-            <Link href="/signup" className="text-indigo-400 hover:text-indigo-300 font-medium">
-              Admins: create accounts
-            </Link>
+          {bootstrapMsg && (
+            <div className={`mt-6 p-3 rounded-xl text-sm ${bootstrap ? 'bg-emerald-900/30 border border-emerald-700 text-emerald-300' : 'bg-slate-800/60 border border-gray-700 text-gray-300'}`}>
+              {bootstrapMsg}
+            </div>
+          )}
+
+          {bootstrap && (
+            <div className="mt-3 p-4 rounded-xl bg-slate-900 border border-indigo-700 text-left space-y-2">
+              <p className="text-xs font-semibold text-indigo-300 uppercase tracking-wider">One-time admin credentials</p>
+              <div className="text-sm text-gray-200">
+                <span className="text-gray-400">Email: </span>
+                <span className="font-mono">{bootstrap.email}</span>
+              </div>
+              <div className="text-sm text-gray-200">
+                <span className="text-gray-400">Password: </span>
+                <span className="font-mono text-amber-300 font-semibold">{bootstrap.oneTimePassword}</span>
+              </div>
+              <p className="text-xs text-gray-400">
+                Copy these now — the password is shown only once and stops working after you set a new one.
+              </p>
+            </div>
+          )}
+
+          <div className="mt-6 pt-4 border-t border-gray-800 flex flex-col items-center gap-2 text-xs text-gray-400">
+            <span>
+              Need access? Contact your Admin.{' '}
+              <Link href="/signup" className="text-indigo-400 hover:text-indigo-300 font-medium">
+                Admins: create accounts
+              </Link>
+            </span>
+            <button
+              type="button"
+              onClick={handleBootstrap}
+              disabled={isBootstrapLoading}
+              className="text-xs text-indigo-400 hover:text-indigo-300 underline font-medium disabled:opacity-50"
+            >
+              {isBootstrapLoading ? 'Initializing...' : 'First run? Initialize the admin account'}
+            </button>
           </div>
         </div>
       </div>
