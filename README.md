@@ -1,3 +1,9 @@
+<p align="center">
+  <a href="https://github.com/Zaki-akdas/Haldiram-ERP/actions/workflows/deploy.yml">
+    <img src="https://github.com/Zaki-akdas/Haldiram-ERP/actions/workflows/deploy.yml/badge.svg" alt="Deploy workflow — lint, typecheck, tests, migrations & production deploy" />
+  </a>
+</p>
+
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
 ## Getting Started
