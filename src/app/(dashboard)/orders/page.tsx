@@ -33,6 +33,10 @@ export default function OrdersPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportStart, setExportStart] = useState('');
+  const [exportEnd, setExportEnd] = useState('');
+  const [exporting, setExporting] = useState(false);
   
   // Filters
   const [status, setStatus] = useState('All');
@@ -123,6 +127,33 @@ export default function OrdersPage() {
     }
   };
 
+  const handleBulkExport = async () => {
+    if (!exportStart || !exportEnd) return;
+    setExporting(true);
+    try {
+      const url = `/api/orders/bulk-invoice?startDate=${exportStart}&endDate=${exportEnd}`;
+      const res = await authFetch(url);
+      if (!res.ok) {
+        const data = await res.json();
+        alert(data.error || 'Export failed');
+        return;
+      }
+      const blob = await res.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `invoices-${exportStart}-to-${exportEnd}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(a.href);
+      setExportOpen(false);
+    } catch {
+      alert('Export failed. Please try again.');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const formatCurrency = (amount: number | string | null | undefined) => {
     return Number(amount || 0).toLocaleString('en-IN', { style: 'currency', currency: 'INR' });
   };
@@ -154,6 +185,14 @@ export default function OrdersPage() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
             Refresh
+          </button>
+          <button
+            onClick={() => setExportOpen(true)}
+            className="px-4 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-sm rounded-xl border border-slate-200 dark:border-slate-700 flex items-center gap-2 transition-all"
+            title="Bulk export invoices as ZIP"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+            Export ZIP
           </button>
           {selectedIds.length > 0 && (
             <button
@@ -317,6 +356,43 @@ export default function OrdersPage() {
           </table>
         </div>
       </div>
+
+      {/* Bulk Export Modal */}
+      {exportOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-sm p-4">
+          <div className="glass-card w-full max-w-md p-6 space-y-4">
+            <h2 className="text-xl font-bold text-slate-900 dark:text-white">Bulk Export Invoices</h2>
+            <p className="text-sm text-slate-500 dark:text-slate-400">Generate a ZIP file containing PDF invoices for all orders within a date range.</p>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="text-xs font-bold text-slate-600 dark:text-slate-400 mb-1 block">Start Date</label>
+                <input type="date" className="input-field" value={exportStart} onChange={(e) => setExportStart(e.target.value)} />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-600 dark:text-slate-400 mb-1 block">End Date</label>
+                <input type="date" className="input-field" value={exportEnd} onChange={(e) => setExportEnd(e.target.value)} />
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 pt-2">
+              <button onClick={() => setExportOpen(false)} className="px-4 py-2 text-sm font-semibold rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                Cancel
+              </button>
+              <button
+                onClick={handleBulkExport}
+                disabled={exporting || !exportStart || !exportEnd}
+                className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {exporting ? (
+                  <span className="flex items-center gap-2">
+                    <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+                    Generating...
+                  </span>
+                ) : 'Download ZIP'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
