@@ -7,26 +7,43 @@ import {
   customers,
   users,
   products,
+  companySettings,
 } from '@/db/schema';
 import { eq, inArray } from 'drizzle-orm';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-// ── Company constants ──────────────────────────────────────────────
-const COMPANY = {
-  name: 'PRO SWAMI SHARNAM ENTERPRISES',
+// ── Default company fallback (used when no settings row exists) ──
+const DEFAULT_COMPANY = {
+  companyName: 'PRO SWAMI SHARNAM ENTERPRISES',
   tagline: 'Haldiram Distribution Hub',
   gstin: '23AMFPV5397L1ZB',
   address: 'Bhopal, Madhya Pradesh – 462001',
   phone: '+91 98765 43210',
   email: 'accounts@swamisharanam.in',
-  bank: {
-    name: 'State Bank of India',
-    account: '3987 6543 2109',
-    ifsc: 'SBIN0001234',
-    branch: 'MP Nagar, Bhopal',
-  },
+  bankName: 'State Bank of India',
+  bankAccount: '3987 6543 2109',
+  bankIfsc: 'SBIN0001234',
+  bankBranch: 'MP Nagar, Bhopal',
 };
+
+async function getCompanySettings() {
+  const rows = await db.select().from(companySettings).limit(1);
+  if (rows.length === 0) return DEFAULT_COMPANY;
+  const r = rows[0];
+  return {
+    companyName: r.companyName || DEFAULT_COMPANY.companyName,
+    tagline: r.tagline || DEFAULT_COMPANY.tagline,
+    gstin: r.gstin || DEFAULT_COMPANY.gstin,
+    address: r.address || DEFAULT_COMPANY.address,
+    phone: r.phone || DEFAULT_COMPANY.phone,
+    email: r.email || DEFAULT_COMPANY.email,
+    bankName: r.bankName || DEFAULT_COMPANY.bankName,
+    bankAccount: r.bankAccount || DEFAULT_COMPANY.bankAccount,
+    bankIfsc: r.bankIfsc || DEFAULT_COMPANY.bankIfsc,
+    bankBranch: r.bankBranch || DEFAULT_COMPANY.bankBranch,
+  };
+}
 
 // ── Helpers ────────────────────────────────────────────────────────
 function inr(n: number): string {
@@ -88,6 +105,9 @@ export async function GET(
       for (const r of rows) productsMap.set(r.id, r);
     }
 
+    // ── Fetch company settings from DB ──
+    const COMPANY = await getCompanySettings();
+
     // ── Build PDF ──
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
     const pageW = 210;
@@ -102,7 +122,7 @@ export async function GET(
     doc.setTextColor(255, 255, 255);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(16);
-    doc.text(COMPANY.name, margin, 14);
+    doc.text(COMPANY.companyName, margin, 14);
     doc.setFontSize(9);
     doc.setFont('helvetica', 'normal');
     doc.text(COMPANY.tagline, margin, 20);
@@ -366,10 +386,10 @@ export async function GET(
     doc.text('BANK DETAILS', summX, y + 5);
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(7.5);
-    doc.text(`Bank: ${COMPANY.bank.name}`, summX, y + 10);
-    doc.text(`A/C: ${COMPANY.bank.account}`, summX, y + 14);
-    doc.text(`IFSC: ${COMPANY.bank.ifsc}`, summX, y + 18);
-    doc.text(`Branch: ${COMPANY.bank.branch}`, summX, y + 22);
+    doc.text(`Bank: ${COMPANY.bankName}`, summX, y + 10);
+    doc.text(`A/C: ${COMPANY.bankAccount}`, summX, y + 14);
+    doc.text(`IFSC: ${COMPANY.bankIfsc}`, summX, y + 18);
+    doc.text(`Branch: ${COMPANY.bankBranch}`, summX, y + 22);
 
     // ── Terms ──
     const termsX = summaryLeft + boxW / 2 + 4;
@@ -395,7 +415,7 @@ export async function GET(
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8);
     doc.setTextColor(100, 116, 139);
-    doc.text('For ' + COMPANY.name, summaryRight - 4, y, { align: 'right' });
+    doc.text('For ' + COMPANY.companyName, summaryRight - 4, y, { align: 'right' });
     y += 16;
     doc.setDrawColor(148, 163, 184);
     doc.line(summaryRight - 60, y, summaryRight - 4, y);

@@ -148,6 +148,22 @@ export const activityLogs = pgTable('activity_logs', {
   createdAt: timestamp('created_at').defaultNow(),
 });
 
+export const companySettings = pgTable('company_settings', {
+  id: serial('id').primaryKey(),
+  companyName: varchar('company_name', { length: 255 }).default(''),
+  tagline: varchar('tagline', { length: 255 }).default(''),
+  gstin: varchar('gstin', { length: 15 }).default(''),
+  address: text('address').default(''),
+  phone: varchar('phone', { length: 20 }).default(''),
+  email: varchar('email', { length: 255 }).default(''),
+  bankName: varchar('bank_name', { length: 255 }).default(''),
+  bankAccount: varchar('bank_account', { length: 50 }).default(''),
+  bankIfsc: varchar('bank_ifsc', { length: 20 }).default(''),
+  bankBranch: varchar('bank_branch', { length: 255 }).default(''),
+  logoUrl: text('logo_url').default(''),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
 export const sessions = pgTable('sessions', {
   id: serial('id').primaryKey(),
   userId: integer('user_id').references(() => users.id).notNull(),
@@ -260,6 +276,9 @@ export type NewInvoice = InferInsertModel<typeof invoices>;
 
 export type ActivityLog = InferSelectModel<typeof activityLogs>;
 export type NewActivityLog = InferInsertModel<typeof activityLogs>;
+
+export type CompanySettings = InferSelectModel<typeof companySettings>;
+export type NewCompanySettings = InferInsertModel<typeof companySettings>;
 
 export type Session = InferSelectModel<typeof sessions>;
 export type NewSession = InferInsertModel<typeof sessions>;
