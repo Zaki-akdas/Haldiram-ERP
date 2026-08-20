@@ -6,6 +6,7 @@ import { useAuth } from '@/components/AuthProvider';
 import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
 import AIChatBubble from '@/components/AIChatBubble';
+import MobileNav from '@/components/MobileNav';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -41,11 +42,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
       <div className="flex flex-1 flex-col min-w-0 transition-all duration-300 lg:ml-64">
         <Header onToggleSidebar={() => setSidebarOpen(!sidebarOpen)} />
-        <main className="flex-1 overflow-y-auto p-4 lg:p-6 custom-scrollbar">
+        <main className="flex-1 overflow-y-auto p-4 lg:p-6 pb-20 lg:pb-6 custom-scrollbar">
           <div className="animate-fade-in">
             {children}
           </div>
         </main>
+        <MobileNav />
         <AIChatBubble />
       </div>
     </div>

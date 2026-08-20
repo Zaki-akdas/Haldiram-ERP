@@ -178,3 +178,19 @@ body {
   padding: 0.875rem 1.25rem;
   font-weight: 600;
 }
+
+/* Mobile safe-area for iPhone notch / home indicator */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .safe-area-pb {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+/* Scrollbar-hide utility */
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
